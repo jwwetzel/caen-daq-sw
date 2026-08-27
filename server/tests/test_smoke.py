@@ -379,6 +379,44 @@ def test_fake_backend_behaves_like_a_board():
         eng.close()
 
 
+def test_scope_mode_free_runs_and_ships_full_resolution_traces():
+    """Scope mode fires software triggers on its own pace and telemetry ships
+    the single trace at FULL resolution - the block-mean decimation that keeps
+    the wire light would average away the noise a scope exists to show."""
+    from daq.backend.base import make_backend
+    eng = AcquisitionEngine(lambda: make_backend("fake"))
+    try:
+        assert eng.probe() is True
+        r = eng.set_scope(10.0)
+        assert r["ok"] and r["scope_hz"] == 10.0
+        assert eng.status()["scope_hz"] == 10.0
+        seen0 = eng.status()["events_seen"]
+        deadline = time.time() + 3
+        full = None
+        while time.time() < deadline:
+            e = eng.telemetry()["channels"].get("0", {})
+            if e.get("last") and len(e["last"]) == C.RECORD_LENGTH:
+                full = e["last"]
+                break
+            time.sleep(0.05)
+        assert full is not None, "no full-resolution trace arrived"
+        assert eng.status()["events_seen"] > seen0     # the scope fed itself
+        r = eng.set_scope(None)
+        assert r["ok"] and eng.status()["scope_hz"] is None
+        # Off again: the wire returns to the light decimated form.
+        deadline = time.time() + 2
+        n = None
+        while time.time() < deadline:
+            e = eng.telemetry()["channels"].get("0", {})
+            if e.get("last") and len(e["last"]) == C.OVERVIEW_POINTS:
+                n = len(e["last"])
+                break
+            time.sleep(0.05)
+        assert n == C.OVERVIEW_POINTS
+    finally:
+        eng.close()
+
+
 def _wait_calibration(eng, timeout=60):
     deadline = time.time() + timeout
     while time.time() < deadline and eng.calibrator.is_active():

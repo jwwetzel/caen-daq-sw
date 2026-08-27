@@ -100,6 +100,11 @@ class AcquisitionEngine:
         self._sw_pending = 0
         self._sw_interval_s = 0.0
         self._sw_next_fire = 0.0
+        # Scope mode: free-running software triggers at a steady pace, with
+        # full-resolution single traces in telemetry (see telemetry()). The
+        # line-noise debugging tool - one trace, replaced by the next.
+        self._scope_hz: float | None = None
+        self._scope_next_fire = 0.0
         # Per-event stats tap for the calibrator: set for the duration of one
         # measurement, fed by the readout loop, then cleared.
         self._stats_col: _StatsCollector | None = None
@@ -334,13 +339,52 @@ class AcquisitionEngine:
         logsetup.did(log, f"Queueing {count} software triggers at {rate_hz:g} Hz", "Ok")
         return {"ok": True, "queued": count, "rate_hz": rate_hz}
 
-    def _fire_due_software_trigger(self):
-        """One trigger per loop pass, no sooner than the requested pace."""
+    def set_scope(self, rate_hz: float | None) -> dict:
+        """Scope mode on (at `rate_hz`) or off (None).
+
+        On: the readout loop free-runs software triggers at a steady pace and
+        telemetry ships each single trace at FULL resolution - the line-noise
+        debugging tool: one trace, replaced by the next, nothing averaged
+        away. The pace is deliberately capped low: full-resolution traces are
+        heavy on the wire, and a noise study needs eyes-on time per trace,
+        not throughput."""
+        if rate_hz is None:
+            with self._lock:
+                already_off = self._scope_hz is None
+                self._scope_hz = None
+            if not already_off:
+                logsetup.did(log, "Leaving scope mode", "Ok")
+            return {"ok": True, "scope_hz": None}
+        if not self._running.is_set():
+            self.start()
+        if not self._running.is_set():           # start() refused: no unit
+            return {"ok": False, "error": "no unit connected"}
         with self._lock:
-            due = self._sw_pending > 0 and time.monotonic() >= self._sw_next_fire
+            mode = self._cfg.software_trigger
+        if mode == "disabled":
+            return {"ok": False, "error": "the software trigger is disabled "
+                                          "in the unit settings"}
+        rate_hz = min(max(float(rate_hz), 0.1), 20.0)
+        with self._lock:
+            self._scope_hz = rate_hz
+            self._scope_next_fire = 0.0          # first trace immediately
+        logsetup.did(log, f"Scope mode: software triggers at {rate_hz:g} Hz", "Ok")
+        return {"ok": True, "scope_hz": rate_hz}
+
+    def _fire_due_software_trigger(self):
+        """One trigger per loop pass, no sooner than the requested pace.
+        Queued test triggers and the scope's free-running pace share this
+        single firing point, so only the readout thread ever touches the
+        handle."""
+        now = time.monotonic()
+        with self._lock:
+            due = self._sw_pending > 0 and now >= self._sw_next_fire
             if due:
                 self._sw_pending -= 1
-                self._sw_next_fire = time.monotonic() + self._sw_interval_s
+                self._sw_next_fire = now + self._sw_interval_s
+            elif self._scope_hz is not None and now >= self._scope_next_fire:
+                due = True
+                self._scope_next_fire = now + 1.0 / self._scope_hz
         if not due:
             return
         try:
@@ -348,6 +392,7 @@ class AcquisitionEngine:
         except Exception as e:
             with self._lock:
                 self._sw_pending = 0    # one report, not one per queued trigger
+                self._scope_hz = None
             self._record_error(f"software trigger: {e}")
 
     def stop(self):
@@ -622,6 +667,7 @@ class AcquisitionEngine:
     def telemetry(self, _channels=None) -> dict:
         with self._lock:
             cfg = self._cfg
+            scope = self._scope_hz is not None
         chans = cfg.enabled_channels()
         dt = C.sample_period_ns(cfg.drs4_frequency)
         # The digitized TR trace rides along as 16+group when enabled.
@@ -647,7 +693,11 @@ class AcquisitionEngine:
             if last is not None:
                 # One single-event trace per tick for the overlay display; the
                 # id lets the client add each event once, not once per render.
-                entry["last"] = decimate(last[1], C.OVERVIEW_POINTS)
+                # Scope mode ships the trace at FULL resolution: the block-mean
+                # decimation that keeps the wire light also averages away the
+                # very noise a scope exists to show.
+                entry["last"] = (last[1].astype(float).tolist() if scope
+                                 else decimate(last[1], C.OVERVIEW_POINTS))
                 entry["last_index"] = last[0]
                 # Peak-to-peak of the FULL single event, before decimation:
                 # the liveness discriminator. A live channel always shows its
@@ -684,6 +734,7 @@ class AcquisitionEngine:
             },
             "events_seen": self._events_seen,
             "sw_triggers_pending": self._sw_pending,
+            "scope_hz": self._scope_hz,
             "recording": self._writer is not None,
             "run_id": self._run_id,
             "run_started": self._run_started,

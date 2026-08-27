@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, openTelemetry } from "./api";
-import type { DisplayPrefs } from "./api";
+import type { DisplayPrefs, WaveMode } from "./api";
 import { SessionsPanel } from "./components/SessionsPanel";
 import { CalibrationPanel } from "./components/CalibrationPanel";
 import type { BoardConfig, Catalog, Status, Telemetry } from "./types";
@@ -42,8 +42,11 @@ export function App() {
   // daq restart or a different browser comes back to the same view.
   const [yRanges, setYRanges] = useState<Record<number, [number, number]>>({});
   // "avg": the 1 s rolling mean. "overlay": the last N single events piled
-  // into a density picture. Persisted with the rest of the display state.
-  const [waveMode, setWaveMode] = useState<"avg" | "overlay">("avg");
+  // into a density picture. "scope": the newest single trace alone, fed by
+  // free-running software triggers. Persisted with the display state.
+  const [waveMode, setWaveMode] = useState<WaveMode>("avg");
+  // Scope mode's software-trigger rate; committed via /api/scope.
+  const [scopeHz, setScopeHz] = useState("2");
   const [testN, setTestN] = useState("100");
   // Blank = record until stopped; a number = auto-close the run at N events.
   const [recMax, setRecMax] = useState("");
@@ -80,11 +83,16 @@ export function App() {
     // Display prefs restore on their own - they never touch the hardware.
     api.getDisplay().then((d) => {
       setYRanges(fromPrefs(d));
-      setWaveMode(d.wave_mode === "overlay" ? "overlay" : "avg");
+      // The display mode restores; the scope's trigger firing does NOT start
+      // on page load - status.scope_hz says whether a scope is already live.
+      setWaveMode(asWaveMode(d.wave_mode));
     }).catch(() => {});
   }, []);
 
   useEffect(() => { loadOnce(); }, [loadOnce]);
+
+  const asWaveMode = (v: DisplayPrefs["wave_mode"]): WaveMode =>
+    v === "overlay" || v === "scope" ? v : "avg";
 
   const fromPrefs = (d: DisplayPrefs): Record<number, [number, number]> => {
     const out: Record<number, [number, number]> = {};
@@ -101,7 +109,7 @@ export function App() {
   };
 
   const saveDisplay = (ranges: Record<number, [number, number]>,
-                       mode: "avg" | "overlay") => {
+                       mode: WaveMode) => {
     window.clearTimeout(displayTimer.current);
     displayTimer.current = window.setTimeout(() => {
       const y_ranges: Record<string, [number, number]> = {};
@@ -115,9 +123,30 @@ export function App() {
     saveDisplay(next, waveMode);
   };
 
-  const changeWaveMode = (mode: "avg" | "overlay") => {
+  const changeWaveMode = (mode: WaveMode) => {
+    // Entering scope starts the free-running software triggers; leaving it
+    // stops them - the display mode and the trigger source are one gesture,
+    // so a scope never silently fires with nobody watching it.
+    if (mode === "scope" && waveMode !== "scope") {
+      setScopeRate(scopeHz);
+    } else if (mode !== "scope" && waveMode === "scope") {
+      api.scope(false).then((r) => setStatus(r.status)).catch(() => {});
+    }
     setWaveMode(mode);
     saveDisplay(yRanges, mode);
+  };
+
+  const setScopeRate = async (raw: string) => {
+    const hz = Math.min(20, Math.max(0.1, Number(raw) || 2));
+    setScopeHz(String(hz));
+    try {
+      const r = await api.scope(true, hz);
+      setStatus(r.status);
+      if (!r.ok) push("err", "Could not start the scope", [r.error ?? ""]);
+    } catch (e) {
+      push("err", "Could not start the scope",
+           [e instanceof Error ? e.message : String(e)]);
+    }
   };
 
   const changeYRange = (ch: number, range: [number, number] | null, all: boolean) => {
@@ -417,6 +446,8 @@ export function App() {
             <h2>Channels <span className="sub">
               {waveMode === "avg"
                 ? `all 16 · avg ${tele?.avg_window_s ?? 1}s window · click a title to rename`
+                : waveMode === "scope"
+                ? `all 16 · newest single trace, full resolution · click a title to rename`
                 : `all 16 · last ${PERSIST_TRACES} events, density-shaded · click a title to rename`}
             </span></h2>
             <div className="wave-mode" role="group" aria-label="Waveform display mode">
@@ -426,6 +457,21 @@ export function App() {
               <button className={waveMode === "overlay" ? "on" : ""}
                 title={`The last ${PERSIST_TRACES} single events stacked, brightness = how often a path is taken`}
                 onClick={() => changeWaveMode("overlay")}>Overlay</button>
+              <button className={waveMode === "scope" ? "on" : ""}
+                disabled={!connected}
+                title="One full-resolution trace at a time, fed by free-running software triggers - for studying the noise on a line"
+                onClick={() => changeWaveMode("scope")}>Scope</button>
+              {waveMode === "scope" ? (
+                <label className="scope-rate" title="Software-trigger rate, 0.1-20 Hz">
+                  <input type="number" min={0.1} max={20} step={0.1} value={scopeHz}
+                    onChange={(e) => setScopeHz(e.target.value)}
+                    onBlur={(e) => setScopeRate(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") setScopeRate((e.target as HTMLInputElement).value);
+                    }} />
+                  Hz
+                </label>
+              ) : null}
             </div>
             <div className="legend">
               <span className="lg live" title="Showing at least its noise floor - a quiet channel seeing only dark counts is live, not dead">live</span>
@@ -592,7 +638,7 @@ export function App() {
             onApplied={(cfg, display, errors, connected, name) => {
               setConfig(cfg); confirmed.current = cfg;
               setYRanges(fromPrefs(display));
-              setWaveMode(display.wave_mode === "overlay" ? "overlay" : "avg");
+              setWaveMode(asWaveMode(display.wave_mode));
               if (!connected) {
                 push("warn", `Session "${name}": display restored`,
                      ["No unit connected - hardware settings were not written."]);

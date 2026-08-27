@@ -277,6 +277,16 @@ def create_app(engine: AcquisitionEngine) -> FastAPI:
                                           float(p.get("rate_hz", 10.0)))
         return {**r, "status": engine.status()}
 
+    @app.post("/api/scope")
+    def scope(payload: dict | None = None):
+        """Scope mode: free-running software triggers at a steady rate, with
+        full-resolution single traces in telemetry - for studying the noise
+        on a line. {"on": true, "rate_hz": 2} or {"on": false}."""
+        p = payload or {}
+        rate = float(p.get("rate_hz", 2.0)) if p.get("on") else None
+        r = engine.set_scope(rate)
+        return {**r, "status": engine.status()}
+
     @app.post("/api/acq/stop")
     def stop():
         engine.stop()

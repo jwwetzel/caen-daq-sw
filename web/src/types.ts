@@ -106,6 +106,8 @@ export interface Status {
   data_dir: string;
   next_run_number?: number;
   sw_triggers_pending?: number;
+  /** Scope mode's free-running software-trigger rate; null/absent = off. */
+  scope_hz?: number | null;
   backend: string;
   board: { model: string; family: string; serial: number; roc_firmware: string; amc_firmware: string; sw_release: string };
   events_seen: number;

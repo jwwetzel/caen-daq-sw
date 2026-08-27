@@ -60,6 +60,11 @@ export const api = {
     fetch("/api/calibrate").then(j<CalibrationStatus>),
   calibrateCancel: () =>
     fetch("/api/calibrate/cancel", { method: "POST" }).then(j<{ ok: boolean }>),
+  scope: (on: boolean, rateHz?: number) =>
+    fetch("/api/scope", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ on, rate_hz: rateHz ?? 2 }),
+    }).then(j<{ ok: boolean; error?: string; scope_hz: number | null; status: Status }>),
 
   getDisplay: () => fetch("/api/display").then(j<DisplayPrefs>),
   setDisplay: (d: DisplayPrefs) =>
@@ -101,12 +106,16 @@ export interface CalibrationStatus {
   error: string | null;
 }
 
+/** The channel plots' display mode: "avg" (rolling average), "overlay"
+ *  (persistence density), or "scope" (the newest single trace alone,
+ *  replaced event by event - the line-noise debugging view). */
+export type WaveMode = "avg" | "overlay" | "scope";
+
 /** UI state that persists across restarts, keyed however the UI likes.
- *  y_ranges: per-channel waveform display range in volts, [min, max].
- *  wave_mode: "avg" (rolling average) or "overlay" (persistence density). */
+ *  y_ranges: per-channel waveform display range in volts, [min, max]. */
 export interface DisplayPrefs {
   y_ranges?: Record<string, [number, number]>;
-  wave_mode?: "avg" | "overlay";
+  wave_mode?: WaveMode;
 }
 
 /** Subscribe to telemetry; auto-reconnects. Returns an unsubscribe fn. */

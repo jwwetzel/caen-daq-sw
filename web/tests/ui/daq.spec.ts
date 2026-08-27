@@ -267,6 +267,39 @@ test("overlay mode paints a density pile and the choice persists", async ({ page
   await page.getByRole("button", { name: /Disable Acquisition/ }).click();
 });
 
+test("scope mode free-runs triggers and stops when left", async ({ page }) => {
+  const status = async () => (await page.request.get("/api/status")).json();
+
+  await page.locator(".wave-mode button", { hasText: "Scope" }).click();
+  // Entering scope starts the free-running software triggers server-side...
+  await expect.poll(async () => (await status()).scope_hz).toBe(2);
+  // ...at the rate shown in the field beside the toggle.
+  await expect(page.locator(".scope-rate input")).toHaveValue("2");
+  // Events arrive with nothing queued: the scope feeds itself.
+  const seen = (await status()).events_seen;
+  await expect.poll(async () => (await status()).events_seen,
+                    { timeout: 10_000 }).toBeGreaterThan(seen);
+  // A single full-resolution trace paints in the first tile.
+  await expect.poll(async () => page.evaluate(() => {
+    const cv = document.querySelector(".tile canvas") as HTMLCanvasElement;
+    const ctx = cv.getContext("2d")!;
+    const d = ctx.getImageData(0, 0, cv.width, cv.height).data;
+    let lit = 0;
+    for (let i = 3; i < d.length; i += 4) if (d[i] > 0) lit++;
+    return lit;
+  }), { timeout: 10_000 }).toBeGreaterThan(200);
+
+  // The rate is adjustable in place.
+  await page.locator(".scope-rate input").fill("5");
+  await page.locator(".scope-rate input").press("Enter");
+  await expect.poll(async () => (await status()).scope_hz).toBe(5);
+
+  // Leaving scope stops the firing - no orphaned trigger source.
+  await page.locator(".wave-mode button", { hasText: "Avg" }).click();
+  await expect.poll(async () => (await status()).scope_hz).toBe(null);
+  await page.getByRole("button", { name: /Disable Acquisition/ }).click();
+});
+
 test("the TR0 card appears when the fast trigger is digitized", async ({ page }) => {
   await page.getByRole("button", { name: /Enable Acquisition/ }).click();
   // "fast trigger" is unique to the TR0 waveform card's subtitle (the TR0

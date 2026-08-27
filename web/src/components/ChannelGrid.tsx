@@ -13,7 +13,7 @@ interface Props {
   /** Per-channel display range in volts; a missing entry means the default. */
   yRanges: Record<number, [number, number]>;
   onYRange: (ch: number, range: [number, number] | null, all: boolean) => void;
-  waveMode: "avg" | "overlay";
+  waveMode: "avg" | "overlay" | "scope";
   clearEpoch: number;
 }
 

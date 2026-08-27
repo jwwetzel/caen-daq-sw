@@ -16,8 +16,9 @@ interface Props {
   /** min/max label edited. `range` null = reset to default; `all` = every channel. */
   onYRange?: (range: [number, number] | null, all: boolean) => void;
   /** "avg" draws the rolling mean; "overlay" stacks the last N single events
-   *  into a density picture. */
-  mode?: "avg" | "overlay";
+   *  into a density picture; "scope" draws the newest single trace alone,
+   *  replaced event by event - nothing averaged, nothing accumulated. */
+  mode?: "avg" | "overlay" | "scope";
   /** Latest single-event trace + its event id (overlay mode's feed). */
   lastWave?: number[];
   lastId?: number;
@@ -156,8 +157,8 @@ export function MiniWave({
 
     // No data yet: the ground marker - where the current offset will put the
     // baseline (nominal model; the real trace is the truth once it arrives).
-    const showingData = mode === "avg"
-      ? !!wave && wave.length > 0
+    const showingData = mode === "avg" ? !!wave && wave.length > 0
+      : mode === "scope" ? !!lastWave && lastWave.length > 0
       : density.current.count > 0;
     if (!showingData && baselineGuide != null) {
       const gy = y(windowVolts(baselineGuide, geom));
@@ -183,6 +184,21 @@ export function MiniWave({
       for (let i = 0; i < n; i++) {
         const px = (i / (n - 1)) * w + dx;
         const yy = clampY(y(windowVolts(wave[i] + s, geom)));
+        i === 0 ? ctx.moveTo(px, yy) : ctx.lineTo(px, yy);
+      }
+      ctx.stroke();
+    }
+
+    // Scope: the newest trace as-is - it is at most one trigger period old,
+    // so no predictive shifting; what arrived is what is on the line.
+    if (mode === "scope" && lastWave && lastWave.length > 0) {
+      const n = lastWave.length;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let i = 0; i < n; i++) {
+        const px = (i / (n - 1)) * w;
+        const yy = clampY(y(windowVolts(lastWave[i], geom)));
         i === 0 ? ctx.moveTo(px, yy) : ctx.lineTo(px, yy);
       }
       ctx.stroke();
