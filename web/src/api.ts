@@ -60,11 +60,12 @@ export const api = {
     fetch("/api/calibrate").then(j<CalibrationStatus>),
   calibrateCancel: () =>
     fetch("/api/calibrate/cancel", { method: "POST" }).then(j<{ ok: boolean }>),
-  scope: (on: boolean, rateHz?: number) =>
+  scope: (on: boolean, rateHz?: number, trigger?: ScopeTrigger | null) =>
     fetch("/api/scope", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ on, rate_hz: rateHz ?? 2 }),
-    }).then(j<{ ok: boolean; error?: string; scope_hz: number | null; status: Status }>),
+      body: JSON.stringify({ on, rate_hz: rateHz ?? 2, trigger: trigger ?? null }),
+    }).then(j<{ ok: boolean; error?: string; scope_hz: number | null;
+                scope_trigger: ScopeTrigger | null; status: Status }>),
 
   getDisplay: () => fetch("/api/display").then(j<DisplayPrefs>),
   setDisplay: (d: DisplayPrefs) =>
@@ -104,6 +105,17 @@ export interface CalibrationStatus {
   iteration: number;
   report: CalibrationRow[];
   error: string | null;
+}
+
+/** The scope's software display trigger: only events where this channel's
+ *  trace crosses level_mv (relative to its own median baseline) refresh the
+ *  display. The x742 has NO hardware channel trigger - every channel-trigger
+ *  call answers -17 - so this filters the randomly-sampled windows; rare
+ *  pulses still need the signal physically routed into TR0. */
+export interface ScopeTrigger {
+  channel: number;
+  level_mv: number;
+  edge: "rising" | "falling";
 }
 
 /** The channel plots' display mode: "avg" (rolling average), "overlay"

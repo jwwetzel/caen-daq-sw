@@ -351,6 +351,14 @@ aside { display: flex; flex-direction: column; gap: 12px; position: sticky; top:
   margin-left: 8px; font-size: 11px; color: var(--muted);
 }
 .scope-rate input { width: 52px; font-size: 11px; padding: 2px 4px; }
+/* The scope's software channel-trigger: channel, level, edge. */
+.scope-trig {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin-left: 10px; font-size: 11px; color: var(--muted);
+}
+.scope-trig select { font-size: 11px; padding: 2px 4px; }
+.scope-trig input { width: 44px; font-size: 11px; padding: 2px 4px; }
+.scope-trig button { font-size: 12px; padding: 1px 7px; cursor: pointer; }
 
 /* collapsible */
 .collapse-head { display: flex; align-items: center; gap: 7px; user-select: none; }

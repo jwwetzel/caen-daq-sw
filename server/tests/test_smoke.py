@@ -438,6 +438,44 @@ def test_scope_mode_free_runs_and_ships_full_resolution_traces():
         eng.close()
 
 
+def test_scope_channel_trigger_gates_the_single_trace_display():
+    """The scope's software channel-trigger: with a condition the fake's
+    pulse cannot meet (rising, on a negative pulse) the single-trace display
+    holds while events keep flowing; with one it meets easily, the display
+    refreshes again. Events are never dropped - only the display is gated."""
+    from daq.backend.base import make_backend
+    eng = AcquisitionEngine(lambda: make_backend("fake"))
+    try:
+        assert eng.probe() is True
+        assert eng.set_scope(20.0)["ok"]
+        deadline = time.time() + 3
+        while time.time() < deadline \
+                and not eng.telemetry()["channels"].get("0", {}).get("last_index"):
+            time.sleep(0.05)
+        # Rising condition on the fake's NEGATIVE ~195 mV pulse: nothing passes.
+        r = eng.set_scope(20.0, {"channel": 0, "level_mv": 100, "edge": "rising"})
+        assert r["ok"] and r["scope_trigger"] == {"channel": 0, "level_mv": 100.0,
+                                                 "edge": "rising"}
+        time.sleep(0.3)                          # in-flight events drain
+        held = eng.telemetry()["channels"]["0"]["last_index"]
+        seen = eng.status()["events_seen"]
+        time.sleep(0.7)
+        assert eng.status()["events_seen"] > seen              # still acquiring
+        assert eng.telemetry()["channels"]["0"]["last_index"] == held  # display held
+        # Falling at 50 mV, well under the pulse: the display refreshes.
+        assert eng.set_scope(20.0, {"channel": 0, "level_mv": 50,
+                                    "edge": "falling"})["ok"]
+        deadline = time.time() + 3
+        while time.time() < deadline \
+                and eng.telemetry()["channels"]["0"]["last_index"] == held:
+            time.sleep(0.05)
+        assert eng.telemetry()["channels"]["0"]["last_index"] > held
+        # A malformed spec falls back to trigger-on-anything, never an error.
+        assert eng.set_scope(20.0, {"channel": "junk"})["scope_trigger"] is None
+    finally:
+        eng.close()
+
+
 def _wait_calibration(eng, timeout=60):
     deadline = time.time() + timeout
     while time.time() < deadline and eng.calibrator.is_active():

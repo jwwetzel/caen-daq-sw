@@ -281,10 +281,14 @@ def create_app(engine: AcquisitionEngine) -> FastAPI:
     def scope(payload: dict | None = None):
         """Scope mode: free-running software triggers at a steady rate, with
         full-resolution single traces in telemetry - for studying the noise
-        on a line. {"on": true, "rate_hz": 2} or {"on": false}."""
+        on a line. {"on": true, "rate_hz": 2} or {"on": false}. An optional
+        "trigger": {"channel": 5, "level_mv": 20, "edge": "falling"} makes
+        only events where that channel crosses the level (vs its own
+        baseline) refresh the display - a software display trigger; the x742
+        has no hardware channel trigger."""
         p = payload or {}
         rate = float(p.get("rate_hz", 2.0)) if p.get("on") else None
-        r = engine.set_scope(rate)
+        r = engine.set_scope(rate, p.get("trigger"))
         return {**r, "status": engine.status()}
 
     @app.post("/api/acq/stop")

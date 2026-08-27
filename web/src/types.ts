@@ -108,6 +108,8 @@ export interface Status {
   sw_triggers_pending?: number;
   /** Scope mode's free-running software-trigger rate; null/absent = off. */
   scope_hz?: number | null;
+  /** The scope's software channel-trigger, when one is set. */
+  scope_trigger?: { channel: number; level_mv: number; edge: string } | null;
   backend: string;
   board: { model: string; family: string; serial: number; roc_firmware: string; amc_firmware: string; sw_release: string };
   events_seen: number;

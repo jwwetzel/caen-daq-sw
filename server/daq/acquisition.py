@@ -105,6 +105,14 @@ class AcquisitionEngine:
         # line-noise debugging tool - one trace, replaced by the next.
         self._scope_hz: float | None = None
         self._scope_next_fire = 0.0
+        # Optional software channel-trigger for the scope: only events where
+        # this channel's trace crosses a level (relative to its own median
+        # baseline) refresh the single-trace display. {"channel", "level_mv",
+        # "edge"} or None for every event. The x742 cannot hardware-trigger
+        # on a signal channel - every channel-trigger call answers -17 - so
+        # this is a display trigger over the randomly-sampled windows, not an
+        # acquisition trigger; rare pulses still need the signal on TR0.
+        self._scope_trigger: dict | None = None
         # Per-event stats tap for the calibrator: set for the duration of one
         # measurement, fed by the readout loop, then cleared.
         self._stats_col: _StatsCollector | None = None
@@ -339,7 +347,26 @@ class AcquisitionEngine:
         logsetup.did(log, f"Queueing {count} software triggers at {rate_hz:g} Hz", "Ok")
         return {"ok": True, "queued": count, "rate_hz": rate_hz}
 
-    def set_scope(self, rate_hz: float | None) -> dict:
+    @staticmethod
+    def _valid_scope_trigger(trigger) -> dict | None:
+        """The scope trigger spec, normalised, or None for trigger-on-anything.
+        A malformed spec becomes None rather than an error: the scope keeps
+        showing traces, which is what a scope is for."""
+        if not isinstance(trigger, dict):
+            return None
+        try:
+            ch = int(trigger["channel"])
+            level = float(trigger["level_mv"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        if not 0 <= ch < C.NUM_CHANNELS + C.NUM_GROUPS:   # 0-15 + TR copies
+            return None
+        edge = trigger.get("edge")
+        return {"channel": ch,
+                "level_mv": min(500.0, max(1.0, level)),
+                "edge": edge if edge in ("rising", "falling") else "falling"}
+
+    def set_scope(self, rate_hz: float | None, trigger: dict | None = None) -> dict:
         """Scope mode on (at `rate_hz`) or off (None).
 
         On: the readout loop free-runs software triggers at a steady pace and
@@ -352,9 +379,10 @@ class AcquisitionEngine:
             with self._lock:
                 already_off = self._scope_hz is None
                 self._scope_hz = None
+                self._scope_trigger = None
             if not already_off:
                 logsetup.did(log, "Leaving scope mode", "Ok")
-            return {"ok": True, "scope_hz": None}
+            return {"ok": True, "scope_hz": None, "scope_trigger": None}
         if not self._running.is_set():
             self.start()
         if not self._running.is_set():           # start() refused: no unit
@@ -365,11 +393,37 @@ class AcquisitionEngine:
             return {"ok": False, "error": "the software trigger is disabled "
                                           "in the unit settings"}
         rate_hz = min(max(float(rate_hz), 0.1), 20.0)
+        trig = self._valid_scope_trigger(trigger)
         with self._lock:
             self._scope_hz = rate_hz
             self._scope_next_fire = 0.0          # first trace immediately
-        logsetup.did(log, f"Scope mode: software triggers at {rate_hz:g} Hz", "Ok")
-        return {"ok": True, "scope_hz": rate_hz}
+            self._scope_trigger = trig
+        on = (f" (showing only events where CH {trig['channel']} crosses "
+              f"{trig['level_mv']:g} mV {trig['edge']})" if trig else "")
+        logsetup.did(log, f"Scope mode: software triggers at {rate_hz:g} Hz{on}",
+                     "Ok")
+        return {"ok": True, "scope_hz": rate_hz, "scope_trigger": trig}
+
+    def _scope_gate(self, ev) -> bool:
+        """Should this event refresh the single-trace display?
+
+        True always, except when the scope's channel-trigger is set: then only
+        events where that channel's trace crosses the level - measured against
+        the trace's own median baseline, so a DC-offset move never changes the
+        condition - hold the display, and everything else leaves the last
+        triggering trace on screen, the way a scope's display holds."""
+        with self._lock:
+            trig = self._scope_trigger if self._scope_hz is not None else None
+        if not trig:
+            return True
+        wave = ev.samples.get(trig["channel"])
+        if wave is None:
+            return True         # the judged channel is not in the event
+        base = float(np.median(wave))
+        level = trig["level_mv"] * (C.ADC_MAX + 1) / 1000.0
+        if trig["edge"] == "rising":
+            return float(wave.max()) - base >= level
+        return base - float(wave.min()) >= level
 
     def _fire_due_software_trigger(self):
         """One trigger per loop pass, no sooner than the requested pace.
@@ -619,9 +673,11 @@ class AcquisitionEngine:
             t = time.monotonic()
             for ev in events:
                 self._events_seen += 1
+                refresh_last = self._scope_gate(ev)
                 for ch, wave in ev.samples.items():
                     self._avg.add(ch, wave, t)
-                    self._last[ch] = (ev.index, wave)
+                    if refresh_last:
+                        self._last[ch] = (ev.index, wave)
                 col = self._stats_col
                 if col is not None:
                     col.add(ev)
@@ -735,6 +791,7 @@ class AcquisitionEngine:
             "events_seen": self._events_seen,
             "sw_triggers_pending": self._sw_pending,
             "scope_hz": self._scope_hz,
+            "scope_trigger": self._scope_trigger,
             "recording": self._writer is not None,
             "run_id": self._run_id,
             "run_started": self._run_started,

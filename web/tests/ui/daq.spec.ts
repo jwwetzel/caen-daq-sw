@@ -294,6 +294,16 @@ test("scope mode free-runs triggers and stops when left", async ({ page }) => {
   await page.locator(".scope-rate input").press("Enter");
   await expect.poll(async () => (await status()).scope_hz).toBe(5);
 
+  // The software channel-trigger travels to the server with its level.
+  await page.locator(".scope-trig select").selectOption("0");
+  await expect.poll(async () => (await status()).scope_trigger?.channel).toBe(0);
+  await page.locator(".scope-trig input").fill("35");
+  await page.locator(".scope-trig input").press("Enter");
+  await expect.poll(async () => (await status()).scope_trigger?.level_mv).toBe(35);
+  // Back to trigger-on-anything.
+  await page.locator(".scope-trig select").selectOption("");
+  await expect.poll(async () => (await status()).scope_trigger ?? null).toBe(null);
+
   // Leaving scope stops the firing - no orphaned trigger source.
   await page.locator(".wave-mode button", { hasText: "Avg" }).click();
   await expect.poll(async () => (await status()).scope_hz).toBe(null);

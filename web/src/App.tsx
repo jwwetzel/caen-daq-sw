@@ -47,6 +47,11 @@ export function App() {
   const [waveMode, setWaveMode] = useState<WaveMode>("avg");
   // Scope mode's software-trigger rate; committed via /api/scope.
   const [scopeHz, setScopeHz] = useState("2");
+  // The scope's channel-trigger: "" = show every event; a channel number =
+  // only events where that trace crosses the level refresh the display.
+  const [scopeTrigCh, setScopeTrigCh] = useState("");
+  const [scopeTrigMv, setScopeTrigMv] = useState("20");
+  const [scopeTrigEdge, setScopeTrigEdge] = useState<"rising" | "falling">("falling");
   const [testN, setTestN] = useState("100");
   // Blank = record until stopped; a number = auto-close the run at N events.
   const [recMax, setRecMax] = useState("");
@@ -128,7 +133,7 @@ export function App() {
     // stops them - the display mode and the trigger source are one gesture,
     // so a scope never silently fires with nobody watching it.
     if (mode === "scope" && waveMode !== "scope") {
-      setScopeRate(scopeHz);
+      applyScope(scopeHz, scopeTrigCh, scopeTrigMv, scopeTrigEdge);
     } else if (mode !== "scope" && waveMode === "scope") {
       api.scope(false).then((r) => setStatus(r.status)).catch(() => {});
     }
@@ -136,11 +141,19 @@ export function App() {
     saveDisplay(yRanges, mode);
   };
 
-  const setScopeRate = async (raw: string) => {
-    const hz = Math.min(20, Math.max(0.1, Number(raw) || 2));
+  /** Push the whole scope state - rate and channel-trigger - in one call, so
+   *  the server never holds a mix of old and new pieces. */
+  const applyScope = async (hzRaw: string, trigCh: string, trigMv: string,
+                            edge: "rising" | "falling") => {
+    const hz = Math.min(20, Math.max(0.1, Number(hzRaw) || 2));
     setScopeHz(String(hz));
+    const trigger = trigCh === "" ? null : {
+      channel: Number(trigCh),
+      level_mv: Math.min(500, Math.max(1, Number(trigMv) || 20)),
+      edge,
+    };
     try {
-      const r = await api.scope(true, hz);
+      const r = await api.scope(true, hz, trigger);
       setStatus(r.status);
       if (!r.ok) push("err", "Could not start the scope", [r.error ?? ""]);
     } catch (e) {
@@ -462,15 +475,58 @@ export function App() {
                 title="One full-resolution trace at a time, fed by free-running software triggers - for studying the noise on a line"
                 onClick={() => changeWaveMode("scope")}>Scope</button>
               {waveMode === "scope" ? (
-                <label className="scope-rate" title="Software-trigger rate, 0.1-20 Hz">
-                  <input type="number" min={0.1} max={20} step={0.1} value={scopeHz}
-                    onChange={(e) => setScopeHz(e.target.value)}
-                    onBlur={(e) => setScopeRate(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") setScopeRate((e.target as HTMLInputElement).value);
-                    }} />
-                  Hz
-                </label>
+                <>
+                  <label className="scope-rate" title="Software-trigger rate, 0.1-20 Hz">
+                    <input type="number" min={0.1} max={20} step={0.1} value={scopeHz}
+                      onChange={(e) => setScopeHz(e.target.value)}
+                      onBlur={(e) => applyScope(e.target.value, scopeTrigCh, scopeTrigMv, scopeTrigEdge)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter")
+                          applyScope((e.target as HTMLInputElement).value,
+                                     scopeTrigCh, scopeTrigMv, scopeTrigEdge);
+                      }} />
+                    Hz
+                  </label>
+                  <span className="scope-trig"
+                    title="Software display trigger: only events where this channel crosses the level (vs its own baseline) refresh the traces. The x742 has no hardware channel trigger, so this samples the line at the scope rate - features present in most windows show; rare pulses still need the signal on TR0.">
+                    trig
+                    <select value={scopeTrigCh}
+                      onChange={(e) => {
+                        setScopeTrigCh(e.target.value);
+                        applyScope(scopeHz, e.target.value, scopeTrigMv, scopeTrigEdge);
+                      }}>
+                      <option value="">any</option>
+                      {Array.from({ length: catalog.geometry.num_channels }, (_, i) => (
+                        <option key={i} value={i}>CH {i}</option>
+                      ))}
+                      <option value={16}>TR0</option>
+                    </select>
+                    {scopeTrigCh !== "" ? (
+                      <>
+                        <input type="number" min={1} max={500} value={scopeTrigMv}
+                          onChange={(e) => setScopeTrigMv(e.target.value)}
+                          onBlur={(e) => applyScope(scopeHz, scopeTrigCh, e.target.value, scopeTrigEdge)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter")
+                              applyScope(scopeHz, scopeTrigCh,
+                                         (e.target as HTMLInputElement).value, scopeTrigEdge);
+                          }} />
+                        mV
+                        <button
+                          title={scopeTrigEdge === "falling"
+                            ? "Triggering on a dip below baseline - click for rising"
+                            : "Triggering on a rise above baseline - click for falling"}
+                          onClick={() => {
+                            const next = scopeTrigEdge === "falling" ? "rising" : "falling";
+                            setScopeTrigEdge(next);
+                            applyScope(scopeHz, scopeTrigCh, scopeTrigMv, next);
+                          }}>
+                          {scopeTrigEdge === "falling" ? "↘" : "↗"}
+                        </button>
+                      </>
+                    ) : null}
+                  </span>
+                </>
               ) : null}
             </div>
             <div className="legend">
