@@ -37,10 +37,15 @@ def _one_of(value, allowed: tuple[str, ...], fallback: str) -> str:
     return v if v in allowed else fallback
 
 
-CORRECTION_LEVELS = ("auto", "disabled", "manual")
+# These allow-lists must cover every choice the catalog offers, or the UI
+# shows a selection silently reverting: _one_of coerces an unknown value to
+# the fallback with no error anywhere. A merge once brought this validation
+# layer in without "timing" and "root", and both features switched
+# themselves off - test_smoke pins the catalog's choices to these lists.
+CORRECTION_LEVELS = ("auto", "disabled", "manual", "timing")
 TRIGGER_EDGES = ("rising", "falling")
 TRIGGER_MODES = ("disabled", "acquisition_only", "extout_only", "acq_and_trgout")
-OUTPUT_FORMATS = ("ascii", "binary")
+OUTPUT_FORMATS = ("ascii", "binary", "root")
 
 @dataclass
 class ChannelConfig:

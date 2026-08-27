@@ -379,6 +379,27 @@ def test_fake_backend_behaves_like_a_board():
         eng.close()
 
 
+def test_every_catalog_choice_survives_config_validation():
+    """The catalog is what the UI offers; __post_init__ is what the config
+    keeps. A choice the validator's allow-list does not know is coerced to a
+    fallback with no error anywhere, so in the UI the selection just reverts.
+    That happened for real: a merge brought the validation layer in without
+    "root" and "timing", and ROOT output and the timing correction switched
+    themselves off silently."""
+    from daq.catalog import UNIT_SETTINGS
+    base = default_config().to_dict()
+    for s in UNIT_SETTINGS:
+        key = s.get("key")
+        if not s.get("choices") or key not in base:
+            continue
+        for choice in s["choices"]:
+            value = choice["value"]
+            got = getattr(BoardConfig.from_dict({**base, key: value}), key)
+            assert got == value, (
+                f"{key}={value!r} was coerced to {got!r}: the config "
+                f"allow-list lags the catalog")
+
+
 def test_scope_mode_free_runs_and_ships_full_resolution_traces():
     """Scope mode fires software triggers on its own pace and telemetry ships
     the single trace at FULL resolution - the block-mean decimation that keeps
