@@ -21,8 +21,8 @@ import { ConnectionBadge } from "./components/ConnectionBadge";
 import { STATUS_POLL_MS } from "./types";
 import { PERSIST_TRACES } from "./waveDensity";
 import { BlurInput } from "./components/BlurInput";
-import { TR_COUPLING_LSB_PER_OFF_LSB, TR_OFF_SLOPE_COUNTS, trRelThresholdV,
-         trThresholdDacFor, windowVolts } from "./volts";
+import { TR_OFF_SLOPE_COUNTS, trAbsThresholdV, trRelToOffsetV,
+         trThresholdDacForAbs, windowVolts } from "./volts";
 
 export function App() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
@@ -273,26 +273,12 @@ export function App() {
   // registers, but there is no sensible reason for them to differ, so the
   // TR0 panel writes every bank at once. Divergence (an old config, a raw
   // register poke) is surfaced below the panel, never silently masked.
+  // RAW threshold semantics (operator's choice, 2026-08-28): threshold and
+  // offset are independent absolute levels on the same volt scale, and the
+  // trigger's effective depth is their difference - shown live in the card's
+  // "vs offset" readout, never silently compensated.
   const updateTrBoth = (key: string, value: any) => {
     if (!config) return;
-    if (key === "fast_trigger_dc_offset") {
-      // The comparator lives in the window frame, so moving the offset moves
-      // the baseline RELATIVE to a fixed threshold. Operators think
-      // baseline-relative ("trigger at -100 mV"), so the threshold DAC
-      // follows the offset by the predicted baseline shift - the margin is
-      // preserved, and calibration can never strand the trigger.
-      const old = config.groups[0].fast_trigger_dc_offset;
-      const dThr = Math.round(
-        TR_COUPLING_LSB_PER_OFF_LSB * (value - old));
-      const groups = config.groups.map((gc) => ({
-        ...gc,
-        fast_trigger_dc_offset: value,
-        fast_trigger_threshold: Math.min(0xFFFF, Math.max(0,
-          gc.fast_trigger_threshold + dThr)),
-      }));
-      pushConfig({ ...config, groups });
-      return;
-    }
     pushConfig({ ...config, groups: config.groups.map((gc) => ({ ...gc, [key]: value })) });
   };
   const updateChannel = (ch: number, patch: Partial<BoardConfig["channels"][number]>) => {
@@ -617,16 +603,14 @@ export function App() {
               ? mem.counts + TR_OFF_SLOPE_COUNTS
                   * (trGroup.fast_trigger_dc_offset - mem.dac)
               : 2048 + (trGroup.fast_trigger_dc_offset - 32768) * TR_OFF_SLOPE_COUNTS;
-            // Trigger: drawn RELATIVE to the baseline marker through the
-            // MEASURED comparator response (spectrum-edge calibration,
-            // serial 53364) - where a pulse must actually reach to fire.
-            // The old window-frame model (0.0329 mV/LSB) put this line 7x
-            // too shallow and drifted off-plot at real threshold DACs.
+            // Trigger: baseline marker plus (threshold - offset) - the RAW
+            // semantics' effective depth, offset 0.360 V with an absolute
+            // 0.220 V threshold drawing the line 140 mV under the baseline.
             const baseV = windowVolts(baseCounts, catalog.geometry);
             const markers = [
               { v: baseV, label: "baseline", color: "#4ac776" },
-              { v: baseV + trRelThresholdV(trGroup.fast_trigger_threshold,
-                    trGroup.fast_trigger_dc_offset, catalog.geometry),
+              { v: baseV + trRelToOffsetV(trGroup.fast_trigger_threshold,
+                    trGroup.fast_trigger_dc_offset),
                 label: "trigger", color: "#f85149" },
             ];
             return (
@@ -672,24 +656,25 @@ export function App() {
               const [g0, g1] = config.groups;
               const diverged = ["fast_trigger_threshold", "fast_trigger_dc_offset"]
                 .some((k) => (g0 as any)[k] !== (g1 as any)[k]);
-              const relV = trRelThresholdV(
-                g0.fast_trigger_threshold, g0.fast_trigger_dc_offset,
-                catalog.geometry);
+              const absV = trAbsThresholdV(g0.fast_trigger_threshold);
+              const relV = trRelToOffsetV(
+                g0.fast_trigger_threshold, g0.fast_trigger_dc_offset);
               return (
                 <>
                   <div className="setting-row"
-                    title={"Trigger level RELATIVE to the baseline - the way pulses are thought about (an MCP pulse of -100 mV wants a threshold around -50 to -80 mV). Kept relative automatically: moving the TR DC offset re-computes the absolute threshold so the margin never changes underneath you.\n\nCAEN_DGTZ_SetGroupFastTriggerThreshold"}>
-                    <label>TR threshold <span className="muted">vs baseline</span></label>
+                    title={"RAW absolute trigger level, on the same volt scale as the TR DC offset. The trigger's effective depth is the difference: offset 0.360 V with a 0.220 V threshold triggers 140 mV below the baseline, shown in the readout. Moving the offset changes that depth - nothing is compensated behind your back.\n\nCAEN_DGTZ_SetGroupFastTriggerThreshold"}>
+                    <label>TR threshold <span className="muted">absolute</span></label>
                     <span className="field">
-                      <BlurInput type="number" step={0.005} min={-0.5} max={0.5}
-                        selectOnFocus value={relV.toFixed(3)}
+                      <BlurInput type="number" step={0.005} min={-0.838} max={1.319}
+                        selectOnFocus value={absV.toFixed(3)}
                         onCommit={(v) => {
-                          const rel = Math.min(0.5, Math.max(-0.5, Number(v) || 0));
                           updateTrBoth("fast_trigger_threshold",
-                            trThresholdDacFor(rel, g0.fast_trigger_dc_offset,
-                                              catalog.geometry));
+                            trThresholdDacForAbs(Number(v) || 0));
                         }} />
                       <span className="unit">V</span>
+                    </span>
+                    <span className="muted tr-rel-note">
+                      = {(relV * 1000).toFixed(0)} mV vs offset
                     </span>
                   </div>
                   <SettingsList defs={offDefs} geom={catalog.geometry}

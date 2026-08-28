@@ -38,30 +38,24 @@ test("unit settings: required first, optional gated behind checkboxes", async ({
 });
 
 test("TR threshold is shown in TR-calibrated volts", async ({ page }) => {
-  // Fake board default threshold 20000 through the MEASURED comparator
-  // calibration: (20000 - 78670) * 0.00494 mV = -290 mV below baseline.
+  // Fake board default threshold 20000: (20000 - 25448) * 0.0329 mV = -179 mV
+  // ABSOLUTE, the raw bench scale shared with the TR offset.
   const row = page.locator(".setting-row", { hasText: "TR threshold" }).first();
   const input = row.locator('input[type="number"]');
-  await expect(input).toHaveValue("-0.290");
+  await expect(input).toHaveValue("-0.179");
   // The change toast must quote the SAME calibration as the field - it once
   // translated the DAC word back through the channel model and announced a
-  // nonsense positive voltage for a negative threshold. (-0.140 is inside
-  // the DAC range; shallower than ~-65 mV would clamp.)
-  await input.fill("-0.140");
+  // nonsense positive voltage for a negative threshold.
+  await input.fill("-0.049");
   await input.press("Enter");
-  await expect(page.getByText(/tr threshold: -0\.140? V/).first()).toBeVisible();
+  await expect(page.getByText(/tr threshold: -0\.049 V/).first()).toBeVisible();
 });
 
-test("moving the TR offset preserves the trigger margin", async ({ page }) => {
-  // The margin in TRUE millivolts, through the measured comparator response
-  // (0.00494 mV per threshold LSB) and the offset's -0.0464 mV/LSB input
-  // shift: the weighted sum is invariant exactly when the coupling holds.
-  const margin = (c: any) => {
-    const off = c.groups[0].fast_trigger_dc_offset;
-    const thr = c.groups[0].fast_trigger_threshold;
-    return thr * 0.00494 + off * 0.0464;
-  };
-  const before = margin(await cfg(page));
+test("moving the TR offset leaves the raw threshold untouched", async ({ page }) => {
+  // RAW semantics: threshold and offset are independent absolute levels.
+  // An offset move must never rewrite the threshold DAC behind the
+  // operator's back - the card's "vs offset" readout shows the new depth.
+  const before = (await cfg(page)).groups[0].fast_trigger_threshold;
 
   const offRow = page.locator(".setting-row", { hasText: "TR DC offset" }).first();
   const input = offRow.locator('input[type="number"]');
@@ -69,9 +63,7 @@ test("moving the TR offset preserves the trigger margin", async ({ page }) => {
   await input.press("Enter");
   await expect.poll(async () => (await cfg(page)).groups[0].fast_trigger_dc_offset)
     .not.toBe(32768);
-  // The threshold followed the offset: the baseline-relative margin held
-  // (to the 0.005 mV granularity of one threshold LSB, plus rounding).
-  expect(Math.abs(margin(await cfg(page)) - before)).toBeLessThan(0.05);
+  expect((await cfg(page)).groups[0].fast_trigger_threshold).toBe(before);
 });
 
 test("unchecking an optional setting writes its default to the unit", async ({ page }) => {

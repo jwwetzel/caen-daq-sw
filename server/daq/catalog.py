@@ -173,26 +173,26 @@ BANK_SETTINGS = [
              "Disabling a bank you are not using cuts readout time and file "
              "size."},
     # The TR input has its own DAC calibrations, distinct from the channels'.
-    # lsb_v/zero_dac drive the UI's volts conversion. The THRESHOLD uses the
-    # calibration MEASURED on serial 53364 (2026-08-28, spectrum-edge method:
-    # the sharp lower edge of the accepted MCP pulse-depth distribution vs
-    # the DAC): 0.00494 mV/LSB, rel = 0 extrapolating to DAC 78670. The
-    # RADiCAL bench constant (0.0329 mV/LSB, zero 25448) is SEVEN times off
-    # for this comparator - typing "-140 mV" through it once armed a -235 mV
-    # cut. The offset's bench numbers, by contrast, agree with the digitized
-    # data and stand.
+    # lsb_v/zero_dac drive the UI's volts conversion; the numbers are the
+    # measured ones from the group's original DAQ (Dec21_RADiCAL daq.cc):
+    # threshold mV ~ (DAC - 25448) * 0.0329, offset mV ~ -(DAC - 33540) * 0.0466.
+    # RAW semantics (operator's convention, 2026-08-28): threshold and offset
+    # are independent absolute levels on the SAME volt scale, and the
+    # trigger's effective depth is their difference - offset 0.360 V with a
+    # 0.220 V threshold triggers 140 mV below the baseline. Nothing couples
+    # them; the TR0 card shows the difference as a live readout.
     {"key": "fast_trigger_threshold", "label": "TR threshold", "type": "volts",
-     "lsb_v": 4.94e-6, "zero_dac": 78670,
+     "lsb_v": 3.29e-5, "zero_dac": 25448,
      "caen": "CAEN_DGTZ_SetGroupFastTriggerThreshold",
-     "help": "How far below its baseline the TR input must dip to fire the "
-             "fast trigger (falling edge) - measured calibration for this "
-             "unit, so what you set is where the pulse-depth spectrum will "
-             "cut.\n\n"
+     "help": "RAW absolute level the TR input must cross to fire the fast "
+             "trigger, on the same volt scale as the TR DC offset - the "
+             "trigger's depth is threshold minus offset (0.220 V against a "
+             "0.360 V offset = 140 mV below baseline).\n\n"
              "Set it well inside your pulse amplitude but clear of the "
-             "baseline noise.\n\n"
+             "baseline noise, and re-check it after moving the offset - "
+             "nothing is compensated automatically.\n\n"
              "On the DT5742B both banks configure the same TR0 input - keep "
-             "them equal. Shallower than about -65 mV is beyond the DAC "
-             "range on this unit."},
+             "them equal."},
     {"key": "fast_trigger_dc_offset", "label": "TR DC offset", "type": "volts",
      "lsb_v": -4.66e-5, "zero_dac": 33540,
      "caen": "CAEN_DGTZ_SetGroupFastTriggerDCOffset",

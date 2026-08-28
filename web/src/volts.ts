@@ -38,37 +38,29 @@ export function trThresholdCounts(thrDac: number): number {
   return 2048 + (thrDac - TR_THR_ZERO_DAC) * TR_THR_COUNTS_PER_LSB;
 }
 
-/** The comparator's TRUE response, measured on serial 53364 (2026-08-28) by
- *  the spectrum-edge method: record runs at two threshold DACs and read the
- *  sharp lower edge of the accepted MCP pulse-depth distribution - the one
- *  observable the analog comparator has. DAC 33731 cut at -222 mV below
- *  baseline and DAC 37983 at -201 mV, so the real scale is ~0.005 mV/LSB -
- *  SEVEN times more compressed than the bench constant above. The bench
- *  numbers remain only for the window-frame plot marker; the operator-facing
- *  relative-threshold field speaks the measured truth. Anchored at TR offset
- *  DAC 25815; re-measure the anchor if the offset moves far from there. */
-export const TR_THR_TRUE_MV_PER_LSB = 0.00494;
-export const TR_THR_ANCHOR_DAC = 33731;
-export const TR_THR_ANCHOR_REL_MV = -222;
-/** Threshold-DAC LSBs per offset-DAC LSB that hold the operator's margin
- *  when the TR offset moves: the offset shifts the input by -0.0464 mV/LSB,
- *  and each threshold LSB is worth only 0.00494 true mV - so the threshold
- *  must chase ~9.4x as many LSBs as the offset moved. */
-export const TR_COUPLING_LSB_PER_OFF_LSB = -0.0464 / TR_THR_TRUE_MV_PER_LSB;
+/** RAW threshold semantics, per the operator (2026-08-28): the threshold and
+ *  the TR DC offset are two levels on the SAME absolute volt scale (the
+ *  RADiCAL bench calibrations above), and the trigger's depth is simply
+ *  their difference. Offset 0.360 V with a desired -0.140 V trigger means
+ *  WRITING an absolute 0.220 V threshold. Nothing is coupled, nothing is
+ *  anchored: what the field says is what the DAC holds. */
+export function trAbsThresholdV(thrDac: number): number {
+  return (thrDac - TR_THR_ZERO_DAC) * 3.29e-5;
+}
 
-/** The threshold DAC that puts the trigger `relV` volts from the baseline -
- *  how the operator thinks ("trigger at -140 mV") - through the MEASURED
- *  comparator response, not the bench model that once armed -235 mV when
- *  -140 was typed. */
-export function trThresholdDacFor(relV: number, _offDac: number, _g: Geom): number {
-  const dac = Math.round(TR_THR_ANCHOR_DAC
-    + (relV * 1000 - TR_THR_ANCHOR_REL_MV) / TR_THR_TRUE_MV_PER_LSB);
+export function trThresholdDacForAbs(absV: number): number {
+  const dac = Math.round(TR_THR_ZERO_DAC + absV / 3.29e-5);
   return Math.min(0xFFFF, Math.max(0, dac));
 }
 
-export function trRelThresholdV(thrDac: number, _offDac: number, _g: Geom): number {
-  return (TR_THR_ANCHOR_REL_MV
-    + (thrDac - TR_THR_ANCHOR_DAC) * TR_THR_TRUE_MV_PER_LSB) / 1000;
+export function trOffsetV(offDac: number): number {
+  return -(offDac - 33540) * 4.66e-5;
+}
+
+/** The informational readout beside the raw field: threshold minus offset -
+ *  the "-0.140 V vs offset" the operator reasons in. */
+export function trRelToOffsetV(thrDac: number, offDac: number): number {
+  return trAbsThresholdV(thrDac) - trOffsetV(offDac);
 }
 
 /** Where 0 V lands in ADC counts for a given DC offset. */

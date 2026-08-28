@@ -45,13 +45,10 @@ RAIL_LO, RAIL_HI = 2, ADC_TOP - 2    # excursions here mean "clipped, or worse"
 # lowers the baseline). Replaced by the measured secant after one step.
 SLOPE_CH = -0.125
 SLOPE_TR = -0.19
-# TR threshold coupling, MEASURED on serial 53364 (2026-08-28, spectrum-edge
-# calibration): the comparator's true response is ~0.00494 mV per threshold
-# LSB - seven times more compressed than the RADiCAL bench constant - while
-# the offset moves the input by -0.0464 mV/LSB. Keeping the operator's margin
-# across an offset move therefore takes ~9.4 threshold LSBs per offset LSB.
-TR_THR_TRUE_MV_PER_LSB = 0.00494
-TR_COUPLING_LSB_PER_OFF_LSB = -0.0464 / TR_THR_TRUE_MV_PER_LSB
+# The TR threshold is RAW (operator's convention, 2026-08-28): an absolute
+# level on the same volt scale as the TR offset, never adjusted behind the
+# operator's back. When the servo moves the TR offset, the trigger's
+# effective depth changes and the operator re-checks it - by design.
 
 TR_KEY = "TR0"
 
@@ -246,17 +243,13 @@ class Calibrator:
         cfg = eng.get_config()
         for s in servos:
             if s.key == TR_KEY:
-                # The trigger margin is the operator's; moving the offset
-                # must not change it. Shift the threshold by the same
-                # predicted delta the baseline moves - this is exactly the
-                # mistake that silenced the trigger the first time
-                # auto-baseline ran.
-                old = cfg.groups[0].fast_trigger_dc_offset
-                d_thr = round(TR_COUPLING_LSB_PER_OFF_LSB * (s.dac - old))
+                # RAW threshold semantics (operator's convention): the
+                # threshold DAC is never touched behind the operator's back.
+                # An offset move changes the trigger's effective depth, so
+                # the report's status line - not a silent compensation - is
+                # what says "re-check your threshold".
                 for g in cfg.groups:      # one TR0, both banks' registers
                     g.fast_trigger_dc_offset = s.dac
-                    g.fast_trigger_threshold = int(min(0xFFFF, max(
-                        0, g.fast_trigger_threshold + d_thr)))
             else:
                 cfg.channels[int(s.key)].dc_offset = s.dac
         got, _ = eng.set_config(cfg)   # write errors already land in status
