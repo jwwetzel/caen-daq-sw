@@ -15,6 +15,7 @@ cell/time/peak-corrected float samples — no software correction port needed.
 from __future__ import annotations
 
 import ctypes as ct
+import os
 import sys
 import time
 
@@ -23,9 +24,58 @@ import numpy as np
 from . import corrections
 from .base import DigitizerBackend, Event, BoardInfo
 from .. import constants as C
+from .. import logsetup
+
+log = logsetup.get("daq.caen")
 
 MAX_X742_CHANNEL_SIZE = 9   # 8 channels + TR trace
 MAX_X742_GROUP_SIZE = 4     # library max; DT5742B populates 2
+
+
+class _Prof:
+    """DAQ_PROFILE=1: where does the time per event actually go, on live
+    triggers? Accumulates wall time per readout phase plus the ReadData batch
+    sizes - the number no offline bench can see - and logs a breakdown every
+    500 events. The overhead is a few perf_counter calls per event."""
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.t: dict[str, float] = {}
+        self.events = 0
+        self.reads = 0
+        self.batch_max = 0
+        self.bytes = 0
+        self.empty_calls = 0
+        self.empty_s = 0.0
+
+    def add(self, key: str, dt: float) -> float:
+        self.t[key] = self.t.get(key, 0.0) + dt
+        return time.perf_counter()
+
+    def empty(self, dt: float):
+        self.empty_calls += 1
+        self.empty_s += dt
+
+    def batch(self, n: int, nbytes: int):
+        self.reads += 1
+        self.events += n
+        self.bytes += nbytes
+        self.batch_max = max(self.batch_max, n)
+        if self.events >= 500:
+            per = " ".join(f"{k}={v / self.events * 1000:.2f}"
+                           for k, v in sorted(self.t.items()))
+            log.info("profile: %d ev in %d reads (max batch %d, %.0f kB/ev); "
+                     "ms/ev: %s; empty ReadData: %d calls, %.2f ms avg",
+                     self.events, self.reads, self.batch_max,
+                     self.bytes / self.events / 1024, per,
+                     self.empty_calls,
+                     self.empty_s / max(1, self.empty_calls) * 1000)
+            self.reset()
+
+
+_prof = _Prof() if os.environ.get("DAQ_PROFILE") == "1" else None
 
 # --- CAEN_DGTZ enums we use (from CAENDigitizerType.h) ---
 CAEN_DGTZ_Success = 0
@@ -49,6 +99,48 @@ _ERROR_NAMES = {
     CAEN_DGTZ_FunctionNotAllowed: "FunctionNotAllowed (unsupported on this model)",
 }
 ConnectionType_USB = 0
+# CAEN_DGTZ_ConnectionType, CAENDigitizerType.h (needs CAENDigitizer >= 2.17;
+# this machine runs 2.18.0). "a4818" is the A4818 USB 3.0 -> CONET adapter
+# talking straight to the digitizer's optical port - the ~80 MB/s path past
+# USB 2.0's ~1 kHz event ceiling. Its LinkNum argument is the adapter's PID
+# (the number printed on the A4818's label, also its USB serial).
+ConnectionType_OpticalLink = 1
+ConnectionType_A4818 = 5
+_LINK_TYPES = {"usb": ConnectionType_USB,
+               "optical": ConnectionType_OpticalLink,
+               "a4818": ConnectionType_A4818}
+
+
+def _link_specs() -> list[tuple[int, int, str]]:
+    """The connections to try, in order: (connection_type, link_num, label).
+
+    From DAQ_LINK, a comma list of 'usb', 'optical[:num]' or 'a4818:<pid>' -
+    e.g. "a4818:25001,usb" tries the optical adapter first and falls back to
+    USB. Unset means plain USB, exactly the old behavior. An a4818 entry
+    without its PID cannot be opened and is skipped with a log line saying
+    where the PID is printed."""
+    specs = []
+    for part in os.environ.get("DAQ_LINK", "usb").split(","):
+        part = part.strip().lower()
+        if not part:
+            continue
+        kind, _, arg = part.partition(":")
+        if kind not in _LINK_TYPES:
+            log.warning("DAQ_LINK entry %r not understood - expected usb, "
+                        "optical[:num] or a4818:<pid>; skipping it", part)
+            continue
+        if kind == "a4818" and not arg:
+            log.warning("DAQ_LINK entry 'a4818' needs the adapter's PID "
+                        "(printed on the A4818 label): a4818:<pid>; skipping it")
+            continue
+        try:
+            num = int(arg) if arg else 0
+        except ValueError:
+            log.warning("DAQ_LINK entry %r: %r is not a number; skipping it",
+                        part, arg)
+            continue
+        specs.append((_LINK_TYPES[kind], num, part))
+    return specs or [(ConnectionType_USB, 0, "usb")]
 AcqMode_SW_CONTROLLED = 0
 TriggerMode_DISABLED = 0
 TriggerMode_ACQ_ONLY = 1
@@ -252,6 +344,7 @@ class CaenBackend(DigitizerBackend):
         self._link_num = link_num
         self._conet_node = conet_node
         self._vme_base = vme_base
+        self.link_used = "usb"        # which DAQ_LINK entry actually opened
         self._buf = ct.POINTER(ct.c_char)()
         self._buf_size = ct.c_uint32(0)
         self._evtptr = ct.c_void_p()      # decoded Event742
@@ -269,10 +362,23 @@ class CaenBackend(DigitizerBackend):
 
     def open(self) -> BoardInfo:
         self._lib = _load_lib()
-        ret = self._lib.CAEN_DGTZ_OpenDigitizer(
-            ConnectionType_USB, self._link_num, self._conet_node,
-            self._vme_base, ct.byref(self._h))
-        self._chk(ret, "OpenDigitizer")
+        # Try each configured link in order (DAQ_LINK; plain USB when unset)
+        # and keep the first that answers. The failure report names every
+        # attempt, so "which cable is it on?" is answered by the log.
+        failures = []
+        ret = None
+        for conn_type, link_num, label in _link_specs():
+            ret = self._lib.CAEN_DGTZ_OpenDigitizer(
+                conn_type, link_num, self._conet_node,
+                self._vme_base, ct.byref(self._h))
+            if ret == CAEN_DGTZ_Success:
+                self.link_used = label
+                if label != "usb":
+                    logsetup.did(log, f"Opening over the {label} link", "Ok")
+                break
+            failures.append(f"{label}: {_ERROR_NAMES.get(ret, ret)}")
+        if ret != CAEN_DGTZ_Success:
+            self._chk(ret, "OpenDigitizer (" + "; ".join(failures) + ")")
         bi = _BoardInfoC()
         self._chk(self._lib.CAEN_DGTZ_GetInfo(self._h, ct.byref(bi)), "GetInfo")
         # Purely informational - the library version shown in the badge tooltip.
@@ -628,19 +734,28 @@ class CaenBackend(DigitizerBackend):
     def read_events(self) -> list[Event]:
         L, h = self._lib, self._h
         read = ct.c_uint32(0)
+        t0 = time.perf_counter() if _prof else 0.0
         ret = L.CAEN_DGTZ_ReadData(h, 0, self._buf, ct.byref(read))  # 0 = SLAVE_TERMINATED
         self._chk(ret, "ReadData")
         if read.value == 0:
+            if _prof:
+                _prof.empty(time.perf_counter() - t0)
             return []
         n = ct.c_uint32(0)
         self._chk(L.CAEN_DGTZ_GetNumEvents(h, self._buf, read, ct.byref(n)), "GetNumEvents")
+        if _prof:
+            _prof.add("readdata", time.perf_counter() - t0)
+            _prof.batch(n.value, read.value)
         out: list[Event] = []
         info = _EventInfo()
         evtdata = ct.c_char_p()
         for i in range(n.value):
+            t0 = time.perf_counter() if _prof else 0.0
             self._chk(L.CAEN_DGTZ_GetEventInfo(h, self._buf, read, i,
                       ct.byref(info), ct.byref(evtdata)), "GetEventInfo")
             self._chk(L.CAEN_DGTZ_DecodeEvent(h, evtdata, ct.byref(self._evtptr)), "DecodeEvent")
+            if _prof:
+                t0 = _prof.add("cdecode", time.perf_counter() - t0)
             ev742 = ct.cast(self._evtptr, ct.POINTER(_X742_EVENT)).contents
             samples: dict[int, np.ndarray] = {}
             trigger_cells: dict[int, int] = {}
@@ -663,6 +778,8 @@ class CaenBackend(DigitizerBackend):
                     ptr = group.DataChannel[ci]
                     chans[ci] = np.ctypeslib.as_array(
                         ptr, shape=(size,)).astype(np.float32).copy()
+                if _prof:
+                    t0 = _prof.add("copy", time.perf_counter() - t0)
                 if self._timing_tables is not None and chans:
                     # Amplitude corrections only, on the whole group at once -
                     # peak removal votes across the group's 8 channels - and
@@ -677,6 +794,8 @@ class CaenBackend(DigitizerBackend):
                     times_ns[gr] = corrections.true_times(
                         t["time"], tc, C.sample_period_ns(self._cfg.drs4_frequency),
                         stack.shape[1])
+                    if _prof:
+                        t0 = _prof.add("correct", time.perf_counter() - t0)
                 for ci, arr in chans.items():
                     # TR traces land at 16+group - the RADiCAL channel[18]
                     # layout's last two slots.

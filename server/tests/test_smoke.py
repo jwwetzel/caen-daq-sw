@@ -451,6 +451,29 @@ def test_stale_config_push_is_refused_and_returns_the_truth():
         eng.close()
 
 
+def test_link_specs_parse_from_the_environment():
+    """DAQ_LINK picks the wire: plain USB when unset (the old behavior,
+    exactly), or an ordered fallback list like "a4818:25001,usb" for the
+    optical adapter with USB as the safety net. Malformed entries are
+    skipped with a log line, never fatal - a typo must not strand the DAQ."""
+    from daq.backend.caen import _link_specs, ConnectionType_USB, ConnectionType_A4818
+    old = os.environ.pop("DAQ_LINK", None)
+    try:
+        assert _link_specs() == [(ConnectionType_USB, 0, "usb")]
+        os.environ["DAQ_LINK"] = "a4818:25001, usb"
+        assert _link_specs() == [(ConnectionType_A4818, 25001, "a4818:25001"),
+                                 (ConnectionType_USB, 0, "usb")]
+        # a4818 without its PID, junk entries, junk numbers: skipped, and the
+        # list never comes back empty.
+        os.environ["DAQ_LINK"] = "a4818, wombat, optical:x"
+        assert _link_specs() == [(ConnectionType_USB, 0, "usb")]
+    finally:
+        if old is None:
+            os.environ.pop("DAQ_LINK", None)
+        else:
+            os.environ["DAQ_LINK"] = old
+
+
 def test_connection_sounds_never_raise():
     """The chirps are a courtesy. No audio device, no sound files, not on
     Windows - none of it may ever raise into the readout path."""

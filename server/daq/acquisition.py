@@ -706,6 +706,10 @@ class AcquisitionEngine:
 
     def _read_loop(self):
         fails = 0
+        # DAQ_PROFILE=1: the engine's half of the per-event time ledger
+        # (display feed, stats tap, writer) - the backend logs its own half.
+        profile = os.environ.get("DAQ_PROFILE") == "1"
+        proc_s, proc_n = 0.0, 0
         while self._running.is_set():
             self._fire_due_software_trigger()
             try:
@@ -726,6 +730,7 @@ class AcquisitionEngine:
                 time.sleep(0.002)
                 continue
             t = time.monotonic()
+            tp = time.perf_counter() if profile else 0.0
             for ev in events:
                 self._events_seen += 1
                 refresh_last = self._scope_gate(ev)
@@ -752,6 +757,14 @@ class AcquisitionEngine:
                             # keep acquiring, so the operator can keep watching.
                             self.stop_recording()
             self._rate.add(len(events))
+            if profile:
+                proc_s += time.perf_counter() - tp
+                proc_n += len(events)
+                if proc_n >= 500:
+                    log.info("profile: engine processing (avg+stats+write) "
+                             "%.2f ms/ev over %d events",
+                             proc_s / proc_n * 1000, proc_n)
+                    proc_s, proc_n = 0.0, 0
 
     def _end_recording_from_loop(self, why: str):
         """Close a recording from the readout thread and say why it stopped."""

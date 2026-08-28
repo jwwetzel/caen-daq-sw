@@ -126,6 +126,16 @@ dump format. Cross-platform without a complex multi-target build (Windows main).
   Verified on serial 53364. The 742 triggers on TR0/TR1 or the external input,
   not a per-group digital self-trigger, so treat those two as absent.
 
+- **Link selection is DAQ_LINK** (environment, read at every open): a comma
+  list tried in order - `usb` (default when unset), `a4818:<pid>` (the A4818
+  USB 3.0 -> CONET optical adapter; the PID is the number printed on its
+  label, also its USB serial), `optical[:num]` (A2818/A3818 PCIe). Set it
+  persistently with `setx DAQ_LINK "a4818:<pid>,usb"` and restart daq - the
+  optical link (~80 MB/s) is the only path past USB 2.0's ~1 kHz event
+  ceiling toward the board's ~3 kHz. Needs CAENDigitizer >= 2.17 (this box:
+  2.18.0) and the A4818 driver. An entry that cannot work (a4818 without a
+  PID, junk) is skipped with a log line, never fatal.
+
 ## Board prerequisites
 
 The app needs only that `libCAENDigitizer` can open the unit. Prerequisites:
