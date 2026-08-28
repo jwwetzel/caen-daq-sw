@@ -513,9 +513,16 @@ button.danger:hover:not(:disabled) { background: #3d1518; border-color: var(--re
   border: 1px solid var(--border); background: #0d1117; color: var(--text);
   font: inherit; font-size: 12px;
 }
-/* Wide enough for a five-digit count next to the number spinner - at 58px
-   Windows' spinner left ~3 digits visible and "1000" read as "100". */
-.rec-input.rec-no { width: 84px; font-variant-numeric: tabular-nums; }
+/* A count field must show EVERY digit - "20000" clipped to "2000" is the
+   worst possible lie for a run bound. The spin buttons are useless for run
+   counts and stole the width that clipped the digit, so they are gone, and
+   the field fits seven digits with room to spare. */
+.rec-input.rec-no { width: 96px; font-variant-numeric: tabular-nums; }
+.rec-input.rec-no::-webkit-outer-spin-button,
+.rec-input.rec-no::-webkit-inner-spin-button,
+.test-trigger input::-webkit-outer-spin-button,
+.test-trigger input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.rec-input.rec-no, .test-trigger input { -moz-appearance: textfield; appearance: textfield; }
 .rec-dot {
   width: 9px; height: 9px; border-radius: 50%; background: var(--red);
   display: inline-block; flex: none;
