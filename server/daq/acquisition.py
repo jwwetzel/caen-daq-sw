@@ -73,7 +73,12 @@ class AcquisitionEngine:
         # WHOLE config it loaded before a restart once silently reverted
         # every offset and name to defaults - the classic stale-document
         # overwrite. The rev turns that into a refusal plus a refresh.
-        self._cfg_rev = 0
+        # SEEDED from the clock, not zero: a counter restarting at 0 let a
+        # tab from a PREVIOUS server process collide with the new process's
+        # small revision numbers and push a stale config straight through
+        # the guard - seen live, minutes after the guard shipped. Seconds
+        # granularity keeps the seed strictly increasing across restarts.
+        self._cfg_rev = int(time.time())
         self._avg = RollingAverage()
         self._rate = TriggerRateMeter()
         # Latest single event per channel, as (event_index, wave). Telemetry
