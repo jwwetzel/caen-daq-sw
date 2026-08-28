@@ -31,7 +31,9 @@ export function RateStrip({ tele }: { tele: Telemetry | null }) {
       <div className="rate-num">
         <span className="big mono">{fmtSI(last)}</span>
         <span className="unit">triggers/s</span>
-        <span className="total mono">Count: {fmtSI(count)}</span>
+        <span className="total mono"
+          title="Every trigger seen since acquisition was armed - runs or no runs. Watching and recording are separate: this keeps counting between runs, so it will exceed any one run's event count.">
+          Seen: {fmtSI(count)}</span>
       </div>
 
       <div className="rate-plot">
