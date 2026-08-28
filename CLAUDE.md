@@ -126,6 +126,29 @@ dump format. Cross-platform without a complex multi-target build (Windows main).
   Verified on serial 53364. The 742 triggers on TR0/TR1 or the external input,
   not a per-group digital self-trigger, so treat those two as absent.
 
+- **TR0 threshold truth (UM4270 rev 12 sec 9.8.3, plus a day of beam
+  measurements, 2026-08-28).** The TR0 input is attenuated x2 into a fast
+  comparator (0-2.5 V dynamic). CAEN's arithmetic - threshold DAC moves
+  13.2 counts per connector-mV, signal 0-Volt at DAC 0x6666 = 26214 - is
+  valid ONLY with the TR DC offset at midscale 0x8000; the manual states
+  outright that no formula exists at other offsets, and it means it: with
+  the offset at DAC 25815 (+0.36 V readout baseline, needed so the full
+  MCP pulse digitizes unclipped), measured trigger turn-ons vs threshold
+  DAC came out NON-MONOTONIC (33731 -> ~250 mV, 34567 -> 164 mV, 37983 ->
+  ~220 mV, 46054+ -> no triggers at all). Off-midscale the threshold is
+  tuned EMPIRICALLY: adjust until counts, then measure the actual cut as
+  the turn-on edge of the recorded MCP pulse-depth spectrum (each run's
+  metadata carries the trigger settings for exactly this). Known-good
+  anchors: canonical NIM row (offset 32768 / threshold 20934 / falling) =
+  CAEN's own -400 mV example, triggers reliably; and the beam-tuned point
+  offset 25815 / threshold 34567 / falling = measured 164 mV cut with the
+  spectrum bulk retained. The RADiCAL bench constant (0.0329 mV/LSB, zero
+  25448) and every extrapolated "measured slope" from sparse edges FAILED
+  on this unit - do not resurrect them. The permanent fix for the
+  offset-vs-threshold tension is a passive splitter: MCP -> TR0 (trigger
+  only, midscale offset, manual arithmetic) + a spare signal channel
+  (3, 8-11 are empty) for full-fidelity pulse digitization.
+
 - **Link selection is DAQ_LINK** (environment, read at every open): a comma
   list tried in order - `usb` (default when unset), `a4818:<pid>` (the A4818
   USB 3.0 -> CONET optical adapter; the PID is the number printed on its
