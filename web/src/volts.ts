@@ -38,29 +38,25 @@ export function trThresholdCounts(thrDac: number): number {
   return 2048 + (thrDac - TR_THR_ZERO_DAC) * TR_THR_COUNTS_PER_LSB;
 }
 
-/** RAW threshold semantics, per the operator (2026-08-28): the threshold and
- *  the TR DC offset are two levels on the SAME absolute volt scale (the
- *  RADiCAL bench calibrations above), and the trigger's depth is simply
- *  their difference. Offset 0.360 V with a desired -0.140 V trigger means
- *  WRITING an absolute 0.220 V threshold. Nothing is coupled, nothing is
- *  anchored: what the field says is what the DAC holds. */
+/** The MANUAL's threshold arithmetic (UM4270 rev 12, sec 9.8.3-9.8.4): the
+ *  TR0 comparator spans 0-2.5 V behind a x2 input attenuator; its DAC moves
+ *  13.2 counts per connector-mV, and DAC 0x6666 = 26214 is the signal's
+ *  0-Volt WHEN THE TR DC OFFSET SITS AT MIDSCALE (0x8000). CAEN's worked
+ *  example: a -400 mV NIM trigger is 26214 - 400*13.2 = 20934 - the value
+ *  that worked here on day one. The manual states outright that no simple
+ *  formula exists for other offset values, which is why the offset belongs
+ *  at midscale and the UI warns when it is not. */
+export const TR_THR_MID_DAC = 26214;
+export const TR_THR_MV_PER_LSB = 1 / 13.2;
+export const TR_OFF_MID_DAC = 32768;
+
 export function trAbsThresholdV(thrDac: number): number {
-  return (thrDac - TR_THR_ZERO_DAC) * 3.29e-5;
+  return ((thrDac - TR_THR_MID_DAC) * TR_THR_MV_PER_LSB) / 1000;
 }
 
 export function trThresholdDacForAbs(absV: number): number {
-  const dac = Math.round(TR_THR_ZERO_DAC + absV / 3.29e-5);
+  const dac = Math.round(TR_THR_MID_DAC + (absV * 1000) / TR_THR_MV_PER_LSB);
   return Math.min(0xFFFF, Math.max(0, dac));
-}
-
-export function trOffsetV(offDac: number): number {
-  return -(offDac - 33540) * 4.66e-5;
-}
-
-/** The informational readout beside the raw field: threshold minus offset -
- *  the "-0.140 V vs offset" the operator reasons in. */
-export function trRelToOffsetV(thrDac: number, offDac: number): number {
-  return trAbsThresholdV(thrDac) - trOffsetV(offDac);
 }
 
 /** Where 0 V lands in ADC counts for a given DC offset. */

@@ -21,7 +21,7 @@ import { ConnectionBadge } from "./components/ConnectionBadge";
 import { STATUS_POLL_MS } from "./types";
 import { PERSIST_TRACES } from "./waveDensity";
 import { BlurInput } from "./components/BlurInput";
-import { TR_OFF_SLOPE_COUNTS, trAbsThresholdV, trRelToOffsetV,
+import { TR_OFF_MID_DAC, TR_OFF_SLOPE_COUNTS, trAbsThresholdV,
          trThresholdDacForAbs, windowVolts } from "./volts";
 
 export function App() {
@@ -603,14 +603,13 @@ export function App() {
               ? mem.counts + TR_OFF_SLOPE_COUNTS
                   * (trGroup.fast_trigger_dc_offset - mem.dac)
               : 2048 + (trGroup.fast_trigger_dc_offset - 32768) * TR_OFF_SLOPE_COUNTS;
-            // Trigger: baseline marker plus (threshold - offset) - the RAW
-            // semantics' effective depth, offset 0.360 V with an absolute
-            // 0.220 V threshold drawing the line 140 mV under the baseline.
+            // Trigger: baseline marker plus the manual-arithmetic threshold
+            // (volts vs the TR signal's zero, UM4270 9.8.3) - exact with the
+            // TR offset at midscale, approximate elsewhere.
             const baseV = windowVolts(baseCounts, catalog.geometry);
             const markers = [
               { v: baseV, label: "baseline", color: "#4ac776" },
-              { v: baseV + trRelToOffsetV(trGroup.fast_trigger_threshold,
-                    trGroup.fast_trigger_dc_offset),
+              { v: baseV + trAbsThresholdV(trGroup.fast_trigger_threshold),
                 label: "trigger", color: "#f85149" },
             ];
             return (
@@ -657,15 +656,14 @@ export function App() {
               const diverged = ["fast_trigger_threshold", "fast_trigger_dc_offset"]
                 .some((k) => (g0 as any)[k] !== (g1 as any)[k]);
               const absV = trAbsThresholdV(g0.fast_trigger_threshold);
-              const relV = trRelToOffsetV(
-                g0.fast_trigger_threshold, g0.fast_trigger_dc_offset);
+              const offMid = g0.fast_trigger_dc_offset === TR_OFF_MID_DAC;
               return (
                 <>
                   <div className="setting-row"
-                    title={"RAW absolute trigger level, on the same volt scale as the TR DC offset. The trigger's effective depth is the difference: offset 0.360 V with a 0.220 V threshold triggers 140 mV below the baseline, shown in the readout. Moving the offset changes that depth - nothing is compensated behind your back.\n\nCAEN_DGTZ_SetGroupFastTriggerThreshold"}>
-                    <label>TR threshold <span className="muted">absolute</span></label>
+                    title={"Trigger level in the manual's arithmetic (UM4270 9.8.3): volts relative to the TR signal's 0-Volt, valid with the TR DC offset at midscale (0x8000). A -140 mV falling trigger is simply -0.140 here. CAEN states no simple formula exists at other offsets - keep the offset at midscale.\n\nCAEN_DGTZ_SetGroupFastTriggerThreshold"}>
+                    <label>TR threshold <span className="muted">vs TR zero</span></label>
                     <span className="field">
-                      <BlurInput type="number" step={0.005} min={-0.838} max={1.319}
+                      <BlurInput type="number" step={0.005} min={-1.986} max={2.979}
                         selectOnFocus value={absV.toFixed(3)}
                         onCommit={(v) => {
                           updateTrBoth("fast_trigger_threshold",
@@ -673,9 +671,11 @@ export function App() {
                         }} />
                       <span className="unit">V</span>
                     </span>
-                    <span className="muted tr-rel-note">
-                      = {(relV * 1000).toFixed(0)} mV vs offset
-                    </span>
+                    {!offMid ? (
+                      <span className="muted tr-rel-note" title="UM4270 9.8.3: the threshold volts are only calibrated with the TR DC offset at midscale (0x8000); CAEN provides no formula for other offsets.">
+                        ⚠ offset not at midscale
+                      </span>
+                    ) : null}
                   </div>
                   <SettingsList defs={offDefs} geom={catalog.geometry}
                     get={(k) => (g0 as any)[k]} onChange={updateTrBoth} />

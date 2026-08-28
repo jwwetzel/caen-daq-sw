@@ -172,25 +172,24 @@ BANK_SETTINGS = [
              "is no per-channel enable.\n\n"
              "Disabling a bank you are not using cuts readout time and file "
              "size."},
-    # The TR input has its own DAC calibrations, distinct from the channels'.
-    # lsb_v/zero_dac drive the UI's volts conversion; the numbers are the
-    # measured ones from the group's original DAQ (Dec21_RADiCAL daq.cc):
-    # threshold mV ~ (DAC - 25448) * 0.0329, offset mV ~ -(DAC - 33540) * 0.0466.
-    # RAW semantics (operator's convention, 2026-08-28): threshold and offset
-    # are independent absolute levels on the SAME volt scale, and the
-    # trigger's effective depth is their difference - offset 0.360 V with a
-    # 0.220 V threshold triggers 140 mV below the baseline. Nothing couples
-    # them; the TR0 card shows the difference as a live readout.
+    # The TR threshold speaks the MANUAL's arithmetic (UM4270 rev 12, sec
+    # 9.8.3): the comparator DAC moves 13.2 counts per connector-mV, with
+    # DAC 0x6666 = 26214 at the signal's 0-Volt WHEN the TR DC offset sits
+    # at midscale (0x8000) - CAEN's worked NIM example, 26214 - 400*13.2 =
+    # 20934, is the value that worked here on day one. The manual states no
+    # simple formula exists for other offset values, so the offset belongs
+    # at midscale; the RADiCAL bench numbers (0.0329 mV/LSB) were wrong by
+    # ~2.3x and cost a day of threshold archaeology.
     {"key": "fast_trigger_threshold", "label": "TR threshold", "type": "volts",
-     "lsb_v": 3.29e-5, "zero_dac": 25448,
+     "lsb_v": 7.5758e-5, "zero_dac": 26214,
      "caen": "CAEN_DGTZ_SetGroupFastTriggerThreshold",
-     "help": "RAW absolute level the TR input must cross to fire the fast "
-             "trigger, on the same volt scale as the TR DC offset - the "
-             "trigger's depth is threshold minus offset (0.220 V against a "
-             "0.360 V offset = 140 mV below baseline).\n\n"
+     "help": "Trigger level in volts relative to the TR signal's 0-Volt "
+             "(UM4270 9.8.3) - a -140 mV falling trigger is -0.140 here. "
+             "Valid with the TR DC offset at midscale (0x8000 = 0 V), where "
+             "CAEN's calibration applies; the manual provides no formula "
+             "for other offsets.\n\n"
              "Set it well inside your pulse amplitude but clear of the "
-             "baseline noise, and re-check it after moving the offset - "
-             "nothing is compensated automatically.\n\n"
+             "baseline noise.\n\n"
              "On the DT5742B both banks configure the same TR0 input - keep "
              "them equal."},
     {"key": "fast_trigger_dc_offset", "label": "TR DC offset", "type": "volts",

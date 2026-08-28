@@ -38,11 +38,11 @@ test("unit settings: required first, optional gated behind checkboxes", async ({
 });
 
 test("TR threshold is shown in TR-calibrated volts", async ({ page }) => {
-  // Fake board default threshold 20000: (20000 - 25448) * 0.0329 mV = -179 mV
-  // ABSOLUTE, the raw bench scale shared with the TR offset.
+  // Fake board default threshold 20000 through the MANUAL's arithmetic
+  // (UM4270 9.8.3): (20000 - 26214) / 13.2 mV = -471 mV vs the TR zero.
   const row = page.locator(".setting-row", { hasText: "TR threshold" }).first();
   const input = row.locator('input[type="number"]');
-  await expect(input).toHaveValue("-0.179");
+  await expect(input).toHaveValue("-0.471");
   // The change toast must quote the SAME calibration as the field - it once
   // translated the DAC word back through the channel model and announced a
   // nonsense positive voltage for a negative threshold.
