@@ -36,6 +36,9 @@ class Run:
     bytes: int
     channels: list[int]
     events: int | None = None
+    # The operator's note from record time - what was tested, beam energy -
+    # so the listing can answer "which run was that?" without opening files.
+    note: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -133,7 +136,8 @@ def describe(run_id: str) -> Run | None:
     return Run(id=run_id,
                started=meta.get("started", os.path.getmtime(path)),
                files=files, bytes=total, channels=chans,
-               events=meta.get("events"))
+               events=meta.get("events"),
+               note=str(meta.get("note") or ""))
 
 
 def listing() -> list[dict]:

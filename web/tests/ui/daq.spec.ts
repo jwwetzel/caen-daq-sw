@@ -334,7 +334,10 @@ test("recording a run writes run_N.root and the number advances", async ({ page 
   await expect(page.locator("#runno")).toHaveAttribute("placeholder", "1");
 
   await page.locator("#runname").fill("ui-suite");
-  await page.locator("button.record").click();
+  // Record first opens the run-notes dialog; the note lands in the metadata.
+  await page.locator(".rec-group button.record").click();
+  await page.locator(".rec-modal textarea").fill("LuAG crystal, 3 GeV electrons");
+  await page.locator(".rec-modal button.record").click();
   await expect(page.locator(".rec-group.on")).toBeVisible();
   // The fake board emits ~5 events/s; a moment later there is data to keep.
   await expect
@@ -350,11 +353,17 @@ test("recording a run writes run_N.root and the number advances", async ({ page 
   const runs = await (await page.request.get("/api/runs")).json();
   expect(runs.runs.length).toBe(1);
   expect(runs.runs[0].events).toBeGreaterThan(0);
+  expect(runs.runs[0].note).toBe("LuAG crystal, 3 GeV electrons");
+  // ...and the listing shows it.
+  await expect(page.locator(".run-note").first())
+    .toHaveText("LuAG crystal, 3 GeV electrons");
   // The number advanced, and an explicit override is respected next.
   await expect(page.locator("#runno")).toHaveAttribute("placeholder", "2");
   await page.locator("#runno").fill("42");
   await page.locator("#runname").fill("ui-suite-2");
-  await page.locator("button.record").click();
+  // An empty note is fine - the dialog never blocks a shift in a hurry.
+  await page.locator(".rec-group button.record").click();
+  await page.locator(".rec-modal button.record").click();
   await expect(page.locator(".rec-group.on")).toBeVisible();
   await page.locator("button.danger", { hasText: "Stop recording" }).click();
   await expect
@@ -368,7 +377,8 @@ test("recording a run writes run_N.root and the number advances", async ({ page 
 test("a bounded recording closes itself at N events", async ({ page }) => {
   await page.locator("#runname").fill("bounded");
   await page.locator("#recmax").fill("3");
-  await page.locator("button.record").click();
+  await page.locator(".rec-group button.record").click();
+  await page.locator(".rec-modal button.record").click();
   await expect(page.locator(".rec-group.on")).toBeVisible();
   // The run ends on its own; acquisition keeps going.
   await expect(page.locator(".rec-group.on")).toHaveCount(0, { timeout: 15_000 });

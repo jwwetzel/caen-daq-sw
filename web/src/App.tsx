@@ -55,6 +55,13 @@ export function App() {
   const [testN, setTestN] = useState("100");
   // Blank = record until stopped; a number = auto-close the run at N events.
   const [recMax, setRecMax] = useState("");
+  // The run-notes dialog: Record opens it, and the note it collects lands in
+  // run_metadata.json - what was tested, beam energy, the context no
+  // register readback can supply. Cleared after each run starts: a note
+  // describes ONE run, and a stale one silently attached to the next run
+  // would be worse than none.
+  const [recDialog, setRecDialog] = useState(false);
+  const [recNote, setRecNote] = useState("");
   // The TR0 baseline marker's memory: the last MEASURED baseline and the
   // offset DAC it was measured under. The measured and bench-predicted
   // baselines disagree by ~200 mV on this unit, so falling back to
@@ -300,17 +307,20 @@ export function App() {
     }
   };
   const startRec = async () => {
+    setRecDialog(false);
     try {
       const n = runNo.trim() === "" ? null : Number(runNo);
       const m = recMax.trim() === "" ? null : Number(recMax);
       const r = await api.recStart(runName, stampRun,
                                    Number.isFinite(n as number) ? n : null,
-                                   Number.isFinite(m as number) ? m : null);
+                                   Number.isFinite(m as number) ? m : null,
+                                   recNote.trim());
       setStatus(r.status);
       if (!r.ok) push("err", "Could not start recording", [r.error ?? "no reason given"]);
       else {
         push("ok", "Recording", [`${r.run}`]);
         setRunNo("");            // the next number is inferred again
+        setRecNote("");          // a note describes one run, never the next
         setRunsKey((k) => k + 1);
       }
     } catch (e) {
@@ -416,7 +426,7 @@ export function App() {
                 <input id="runname" className="rec-input" placeholder="e.g. cosmics" value={runName}
                   disabled={!connected}
                   onChange={(e) => setRunName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") startRec(); }} />
+                  onKeyDown={(e) => { if (e.key === "Enter") setRecDialog(true); }} />
                 <label className="rec-label" htmlFor="runno"
                   title="The analysis-facing run number (run_N.root). Prefilled with one past the highest number in the data directory; type to override.">
                   Run #
@@ -425,7 +435,7 @@ export function App() {
                   placeholder={String(status?.next_run_number ?? "")}
                   value={runNo} disabled={!connected}
                   onChange={(e) => setRunNo(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") startRec(); }} />
+                  onKeyDown={(e) => { if (e.key === "Enter") setRecDialog(true); }} />
                 <label className="rec-label" htmlFor="recmax"
                   title="Stop the recording automatically after this many events. Blank = record until stopped. Acquisition keeps running either way.">
                   for
@@ -433,14 +443,15 @@ export function App() {
                 <input id="recmax" className="rec-input rec-no" type="number" min={1}
                   placeholder="&#8734; ev" value={recMax} disabled={!connected}
                   onChange={(e) => setRecMax(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") startRec(); }} />
+                  onKeyDown={(e) => { if (e.key === "Enter") setRecDialog(true); }} />
                 <label className="rec-stamp" title="Append the date and time, so runs of the same name never collide">
                   <input type="checkbox" checked={stampRun} disabled={!connected}
                     onChange={(e) => setStampRun(e.target.checked)} />
                   Include timestamp
                 </label>
-                <button className="record" onClick={startRec} disabled={!connected}
-                  title="Start writing this run to disk">
+                <button className="record" onClick={() => setRecDialog(true)}
+                  disabled={!connected}
+                  title="Start writing this run to disk (asks for a run note first)">
                   <span className="rec-dot" />Record
                 </button>
               </>
@@ -753,6 +764,35 @@ export function App() {
         </fieldset>
       </div>
       <Toasts toasts={toasts} onDismiss={dismiss} />
+      {recDialog ? (
+        <div className="modal-backdrop" onClick={() => setRecDialog(false)}>
+          <div className="modal rec-modal" onClick={(e) => e.stopPropagation()}
+            role="dialog" aria-label="Run notes">
+            <h3>
+              Run {runNo.trim() || status?.next_run_number || "?"}
+              {runName.trim() ? ` · ${runName.trim()}` : ""}
+              {recMax.trim() ? ` · ${recMax.trim()} events` : ""}
+            </h3>
+            <textarea autoFocus rows={4} maxLength={2000} value={recNote}
+              placeholder="What is this run? Tested device, beam energy, HV, conditions..."
+              onChange={(e) => setRecNote(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) startRec();
+                if (e.key === "Escape") setRecDialog(false);
+              }} />
+            <p className="muted">
+              Saved as "note" in run_metadata.json and shown in the run list.
+              Ctrl+Enter records.
+            </p>
+            <div className="modal-btns">
+              <button onClick={() => setRecDialog(false)}>Cancel</button>
+              <button className="record" onClick={startRec}>
+                <span className="rec-dot" />Record
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {tour ? <Tour steps={QUICK_USE} onClose={() => setTour(false)} /> : null}
     </div>
   );

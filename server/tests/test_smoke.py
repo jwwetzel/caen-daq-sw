@@ -400,6 +400,19 @@ def test_every_catalog_choice_survives_config_validation():
                 f"allow-list lags the catalog")
 
 
+def test_run_note_lands_in_the_metadata_sidecar():
+    """The record dialog's note - what was tested, beam energy - is stored
+    verbatim in run_metadata.json, where the listing and the analysis read
+    it. The one fact about a run no register readback can supply."""
+    from daq.writer import write_run_metadata
+    with tempfile.TemporaryDirectory() as d:
+        write_run_metadata(d, default_config(), "beam", 7, "LuAG, 3 GeV e-")
+        with open(os.path.join(d, "run_metadata.json")) as f:
+            meta = json.load(f)
+        assert meta["note"] == "LuAG, 3 GeV e-"
+        assert meta["run_number"] == 7
+
+
 def test_scope_mode_free_runs_and_ships_full_resolution_traces():
     """Scope mode fires software triggers on its own pace and telemetry ships
     the single trace at FULL resolution - the block-mean decimation that keeps

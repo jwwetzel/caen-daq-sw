@@ -557,7 +557,8 @@ class AcquisitionEngine:
     # ---------- recording ----------
     def start_recording(self, name: str, timestamp: bool = True,
                         run_number: int | None = None,
-                        max_events: int | None = None) -> dict:
+                        max_events: int | None = None,
+                        note: str = "") -> dict:
         """Begin writing to a new run directory, starting acquisition if the
         operator has not already. Watching and recording are separate actions.
 
@@ -598,7 +599,8 @@ class AcquisitionEngine:
                 return {"ok": False, "error": f"could not create the run directory: {e}"}
             with self._lock:
                 cfg = self._cfg
-            writer = make_writer(path, run_id, cfg.output_format, run_number)
+            writer = make_writer(path, run_id, cfg.output_format, run_number,
+                                 note)
             try:
                 writer.open(cfg)
                 logsetup.did(log, "Creating the run directory", path)

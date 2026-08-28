@@ -4,6 +4,8 @@ import type { Status } from "../types";
 interface RunInfo {
   id: string; started: number;
   files: number; bytes: number; channels: number[]; events: number | null;
+  /** The operator's note from record time - what was tested, beam energy. */
+  note?: string;
 }
 
 /** Recorded runs: what is on the server, downloadable, and deletable.
@@ -73,6 +75,9 @@ export function RunsPanel({ status, refreshKey }: { status: Status | null; refre
                     {when(r.started)} · {r.channels.length} ch ·{" "}
                     {r.events != null ? `${r.events} ev` : "? ev"} · {size(r.bytes)}
                   </span>
+                  {r.note ? (
+                    <span className="run-note" title={r.note}>{r.note}</span>
+                  ) : null}
                 </div>
                 {live ? (
                   <span className="run-live">recording</span>

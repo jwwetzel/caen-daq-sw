@@ -180,8 +180,11 @@ def create_app(engine: AcquisitionEngine) -> FastAPI:
             me = None
         if me is not None and me < 1:
             me = None
+        # The operator's note about this specific run - free text, capped so a
+        # pasted logbook cannot balloon the sidecar.
+        note = str(p.get("note") or "").strip()[:2000]
         r = engine.start_recording((p.get("name") or "").strip(),
-                                   bool(p.get("timestamp", True)), rn, me)
+                                   bool(p.get("timestamp", True)), rn, me, note)
         return {**r, "status": engine.status()}
 
     @app.post("/api/rec/stop")
