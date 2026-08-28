@@ -18,16 +18,21 @@ export interface ConfigResult {
   config: BoardConfig;
   errors: string[];
   connected: boolean;
+  /** The server's config revision after this call - the tab's new base. */
+  config_rev?: number;
+  /** True when the write was refused because the tab's config predates the
+   *  server's current state; `config` then carries the current truth. */
+  stale?: boolean;
 }
 
 export const api = {
   status: () => fetch("/api/status").then(j<Status>),
   catalog: () => fetch("/api/catalog").then(j<Catalog>),
   getConfig: () => fetch("/api/config").then(j<BoardConfig>),
-  setConfig: (cfg: BoardConfig) =>
+  setConfig: (cfg: BoardConfig, baseRev?: number) =>
     fetch("/api/config", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(cfg),
+      body: JSON.stringify({ ...cfg, base_rev: baseRev ?? null }),
     }).then(j<ConfigResult>),
   resetDefault: () =>
     fetch("/api/config/default", { method: "POST" }).then(j<ConfigResult>),

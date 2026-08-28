@@ -110,6 +110,8 @@ export interface Status {
   scope_hz?: number | null;
   /** The scope's software channel-trigger, when one is set. */
   scope_trigger?: { channel: number; level_mv: number; edge: string } | null;
+  /** Bumped on every accepted config; tabs refetch when it moves. */
+  config_rev?: number;
   backend: string;
   board: { model: string; family: string; serial: number; roc_firmware: string; amc_firmware: string; sw_release: string };
   events_seen: number;

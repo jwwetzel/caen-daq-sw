@@ -421,6 +421,36 @@ def test_every_catalog_choice_survives_config_validation():
                 f"allow-list lags the catalog")
 
 
+def test_stale_config_push_is_refused_and_returns_the_truth():
+    """A tab pushing a whole config based on an older revision must be
+    refused: accepting one once reverted every calibrated offset and name
+    to the tab's stale pre-restart snapshot. The refusal returns the
+    current config and revision so the tab catches up instead."""
+    from fastapi.testclient import TestClient
+    from daq.backend.base import make_backend
+    eng = AcquisitionEngine(lambda: make_backend("fake"))
+    try:
+        assert eng.probe() is True
+        c = TestClient(create_app(eng))
+        cfg = c.get("/api/config").json()
+        rev = c.get("/api/status").json()["config_rev"]
+        # A current-revision push lands and bumps the revision.
+        cfg["channels"][0]["dc_offset"] = 40123
+        r = c.post("/api/config", json={**cfg, "base_rev": rev}).json()
+        assert r["ok"] and r["config"]["channels"][0]["dc_offset"] == 40123
+        assert r["config_rev"] == rev + 1
+        # The same, now stale, revision is refused and nothing changes.
+        cfg["channels"][0]["dc_offset"] = 30001
+        r2 = c.post("/api/config", json={**cfg, "base_rev": rev}).json()
+        assert r2.get("stale") is True and not r2["ok"]
+        assert r2["config"]["channels"][0]["dc_offset"] == 40123
+        # A push naming no base (scripts, curl) still works as before.
+        r3 = c.post("/api/config", json=cfg).json()
+        assert r3["ok"] and r3["config"]["channels"][0]["dc_offset"] == 30001
+    finally:
+        eng.close()
+
+
 def test_run_note_lands_in_the_metadata_sidecar():
     """The record dialog's note - what was tested, beam energy - is stored
     verbatim in run_metadata.json, where the listing and the analysis read

@@ -56,15 +56,31 @@ def create_app(engine: AcquisitionEngine) -> FastAPI:
 
     @app.post("/api/config")
     def set_config(payload: dict):
+        # The client says which revision its config is based on. A mismatch
+        # means the server's state moved underneath it (another window, a
+        # session apply, a reconnect) - and because the UI pushes the WHOLE
+        # config, accepting the write would revert every setting to that
+        # tab's stale snapshot. That happened for real: a tab holding
+        # pre-restart defaults wiped 16 calibrated offsets with one click.
+        base_rev = payload.pop("base_rev", None)
         try:
             wanted = BoardConfig.from_dict(payload)
         except (TypeError, ValueError) as e:
             raise HTTPException(400, f"not a usable config: {e}")
+        if base_rev is not None and int(base_rev) != engine.config_rev():
+            return {"ok": False, "stale": True,
+                    "config": engine.get_config().to_dict(),
+                    "config_rev": engine.config_rev(),
+                    "errors": ["the settings changed elsewhere since this "
+                               "page loaded them - showing the current state; "
+                               "re-apply your change"],
+                    "connected": engine.status()["opened"]}
         # The errors come back from the call itself. Diffing engine.status()
         # before and after cannot work: that list is a capped ring, so once it
         # is full the diff is empty and a refused write reports success.
         cfg, errors = engine.set_config(wanted)
         return {"ok": not errors, "config": cfg.to_dict(), "errors": errors,
+                "config_rev": engine.config_rev(),
                 "connected": engine.status()["opened"]}
 
     @app.get("/api/config/file")

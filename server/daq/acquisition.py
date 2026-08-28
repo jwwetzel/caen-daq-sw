@@ -66,6 +66,12 @@ class AcquisitionEngine:
         self._backend: DigitizerBackend | None = None
         self._board_info = BoardInfo()
         self._cfg = default_config()   # only a seed; the board wins once open
+        # Bumped on every adopted config (open, write, session). A browser
+        # tab compares it against the one it fetched under: a tab pushing a
+        # WHOLE config it loaded before a restart once silently reverted
+        # every offset and name to defaults - the classic stale-document
+        # overwrite. The rev turns that into a refusal plus a refresh.
+        self._cfg_rev = 0
         self._avg = RollingAverage()
         self._rate = TriggerRateMeter()
         # Latest single event per channel, as (event_index, wave). Telemetry
@@ -140,8 +146,7 @@ class AcquisitionEngine:
                     self._record_error(f"read settings: {e}")
                 reading.done(f"{len(errs)} settings could not be read" if errs
                              else "All settings read")
-            with self._lock:
-                self._cfg = cfg
+            self._adopt_cfg(cfg)
             # Last, not first: while this is False every other path treats the
             # unit as absent and keeps off the wire, so nothing talks to a board
             # that is still being set up.
@@ -155,6 +160,17 @@ class AcquisitionEngine:
         itself and saw nothing to re-arm for."""
         with self._lock:
             return BoardConfig.from_dict(self._cfg.to_dict())
+
+    def _adopt_cfg(self, cfg: BoardConfig) -> None:
+        """Every accepted config lands here so the revision moves with it -
+        the counter a browser tab uses to notice it is holding history."""
+        with self._lock:
+            self._cfg = cfg
+            self._cfg_rev += 1
+
+    def config_rev(self) -> int:
+        with self._lock:
+            return self._cfg_rev
 
     def _dac_backed_changed(self, cfg: BoardConfig) -> bool:
         """Did this write touch a setting that lives on a mezzanine DAC?
@@ -222,8 +238,7 @@ class AcquisitionEngine:
                 self._record_error(e)
             writing.done(f"{len(errors)} settings refused or read back wrong"
                          if errors else "All settings accepted and read back")
-        with self._lock:
-            self._cfg = actual
+        self._adopt_cfg(actual)
         if rearm:
             self.start()               # the arm is what loads the DACs
         return actual, errors
@@ -263,8 +278,7 @@ class AcquisitionEngine:
                     self._record_error(e)
                 applying.done(f"{len(cfg_errs)} settings refused" if cfg_errs
                               else "All settings accepted")
-            with self._lock:
-                self._cfg = actual
+            self._adopt_cfg(actual)
             self._events_seen = 0      # Count reflects this acquisition run
             self._rate.reset()
             try:
@@ -794,6 +808,7 @@ class AcquisitionEngine:
             "sw_triggers_pending": self._sw_pending,
             "scope_hz": self._scope_hz,
             "scope_trigger": self._scope_trigger,
+            "config_rev": self._cfg_rev,
             "recording": self._writer is not None,
             "run_id": self._run_id,
             "run_started": self._run_started,

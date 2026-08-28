@@ -79,6 +79,11 @@ export function App() {
   const displayTimer = useRef<number | undefined>(undefined);
   // The config the unit last confirmed - what a change gets measured against.
   const confirmed = useRef<BoardConfig | null>(null);
+  // The server's config revision this tab is based on. Sent with every push
+  // so a tab holding history is refused instead of silently reverting the
+  // unit; when the status poll shows the revision moved (another window, a
+  // session apply, a reconnect), the tab refetches rather than goes stale.
+  const cfgRev = useRef(0);
   const { toasts, push, dismiss } = useToasts();
 
   const loadOnce = useCallback(async () => {
@@ -87,6 +92,7 @@ export function App() {
       const [cat, cfg, st] = await Promise.all([api.catalog(), api.getConfig(), api.status()]);
       setCatalog(cat); setConfig(cfg); setStatus(st);
       confirmed.current = cfg;
+      cfgRev.current = st.config_rev ?? 0;
     } catch (e) {
       // Leaving this to console.error left the page reading "Loading..." for
       // ever, with nothing on screen to say the server had not answered.
@@ -192,7 +198,17 @@ export function App() {
     const tick = async () => {
       try {
         const st = await api.status();
-        if (!cancelled) { setStatus(st); setServerUp(true); }
+        if (cancelled) return;
+        setStatus(st); setServerUp(true);
+        // The config moved underneath this tab - another window, a session
+        // apply, a server restart. Refetch instead of quietly going stale:
+        // a stale tab once pushed its whole old snapshot and reverted every
+        // offset and name on the unit.
+        if (st.config_rev != null && st.config_rev !== cfgRev.current) {
+          cfgRev.current = st.config_rev;
+          const cfg = await api.getConfig();
+          if (!cancelled) { setConfig(cfg); confirmed.current = cfg; }
+        }
       } catch {
         if (!cancelled) setServerUp(false);
       }
@@ -208,9 +224,17 @@ export function App() {
     saveTimer.current = window.setTimeout(() => {
       // Whatever the board reports wins - a rejected write must not leave the
       // UI showing a value the hardware never took.
-      api.setConfig(next)
+      api.setConfig(next, cfgRev.current)
         .then((r) => {
+          if (r.config_rev != null) cfgRev.current = r.config_rev;
           setConfig(r.config);
+          if (r.stale) {
+            // This tab's config predates the server's state; the write was
+            // refused and the fields now show the current truth.
+            confirmed.current = r.config;
+            push("warn", "Settings changed elsewhere", r.errors ?? []);
+            return;
+          }
           const prev = confirmed.current ?? r.config;
           const lines = catalogRef.current
             ? describeChanges(prev, r.config, next, catalogRef.current) : [];
