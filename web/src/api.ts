@@ -40,12 +40,15 @@ export const api = {
   start: () =>
     fetch("/api/acq/start", { method: "POST" }).then(j<Status & { started: boolean }>),
   recStart: (name: string, timestamp: boolean, runNumber?: number | null,
-             maxEvents?: number | null, note?: string) =>
+             maxEvents?: number | null, note?: string, intoExisting?: boolean) =>
     fetch("/api/rec/start", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, timestamp, run_number: runNumber ?? null,
-                             max_events: maxEvents ?? null, note: note ?? "" }),
+                             max_events: maxEvents ?? null, note: note ?? "",
+                             into_existing: intoExisting ?? false }),
     }).then(j<{ ok: boolean; error?: string; run?: string; status: Status }>),
+  runs: () =>
+    fetch("/api/runs").then(j<{ runs: { id: string }[]; data_dir: string }>),
   recStop: () =>
     fetch("/api/rec/stop", { method: "POST" })
       .then(j<{ ok: boolean; error?: string; run?: string; status: Status }>),

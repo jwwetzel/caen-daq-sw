@@ -455,13 +455,24 @@ def test_run_note_lands_in_the_metadata_sidecar():
     """The record dialog's note - what was tested, beam energy - is stored
     verbatim in run_metadata.json, where the listing and the analysis read
     it. The one fact about a run no register readback can supply."""
-    from daq.writer import write_run_metadata
+    from daq.writer import write_run_metadata, stamp_run_end
     with tempfile.TemporaryDirectory() as d:
         write_run_metadata(d, default_config(), "beam", 7, "LuAG, 3 GeV e-")
         with open(os.path.join(d, "run_metadata.json")) as f:
             meta = json.load(f)
         assert meta["note"] == "LuAG, 3 GeV e-"
         assert meta["run_number"] == 7
+        # A campaign folder: a second recording into the same directory keeps
+        # BOTH runs' notes and event counts, while the top level tracks the
+        # latest - which is also what single-run folders always showed.
+        write_run_metadata(d, default_config(), "beam", 8, "same setup, 5 GeV")
+        stamp_run_end(d, 250, 8)
+        with open(os.path.join(d, "run_metadata.json")) as f:
+            meta = json.load(f)
+        assert meta["runs"]["7"]["note"] == "LuAG, 3 GeV e-"
+        assert meta["runs"]["8"]["note"] == "same setup, 5 GeV"
+        assert meta["runs"]["8"]["events"] == 250
+        assert meta["note"] == "same setup, 5 GeV" and meta["events"] == 250
 
 
 def test_scope_mode_free_runs_and_ships_full_resolution_traces():

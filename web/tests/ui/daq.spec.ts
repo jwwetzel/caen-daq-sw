@@ -389,6 +389,35 @@ test("a bounded recording closes itself at N events", async ({ page }) => {
   expect(runs.runs.find((r: any) => r.id.startsWith("bounded")).events).toBe(3);
 });
 
+test("a second run joins an existing folder when picked without timestamp", async ({ page }) => {
+  const status = async () => (await page.request.get("/api/status")).json();
+  // Timestamp off, so the folder carries the bare campaign name.
+  await page.locator(".rec-stamp input").uncheck();
+  await page.locator("#runname").fill("campaign");
+  await page.locator(".rec-group button.record").click();
+  await expect(page.locator(".rec-dest")).toContainText("new run folder");
+  await page.locator(".rec-modal button.record").click();
+  await expect(page.locator(".rec-group.on")).toBeVisible();
+  await page.locator("button.danger", { hasText: "Stop recording" }).click();
+  await expect.poll(async () => (await status()).recording).toBe(false);
+  const dirs0 = (await (await page.request.get("/api/runs")).json()).runs.length;
+
+  // Same name, timestamp still off: the dialog announces it JOINS the
+  // folder, and no new directory appears - the campaign stays together.
+  await page.locator(".rec-group button.record").click();
+  await expect(page.locator(".rec-dest")).toContainText("existing folder");
+  await page.locator(".rec-modal button.record").click();
+  await expect(page.locator(".rec-group.on")).toBeVisible();
+  await page.locator("button.danger", { hasText: "Stop recording" }).click();
+  await expect.poll(async () => (await status()).recording).toBe(false);
+
+  const runs = (await (await page.request.get("/api/runs")).json()).runs;
+  expect(runs.length).toBe(dirs0);
+  const camp = runs.find((r: { id: string }) => r.id === "campaign");
+  expect(camp.files).toBeGreaterThanOrEqual(3);   // 2 x run_N.root + metadata
+  await page.locator(".rec-stamp input").check(); // leave it as found
+});
+
 test("a legacy Configuration B file loads through the Load button", async ({ page }) => {
   const legacy = [
     "Module 125", "DRS4FREQ 0",

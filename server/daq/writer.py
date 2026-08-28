@@ -7,7 +7,7 @@ Binary = optional 6x uint32 header then samples. For the 742, corrected samples
 are floats.
 
 NOTE (validation pending): byte-exactness vs a real WaveDump dump has not been
-checked against hardware output yet — a sample .dat from the board will let us
+checked against hardware output yet - a sample .dat from the board will let us
 confirm/lock the layout. The structure below follows WaveDump.c/WriteOutputFiles.
 """
 from __future__ import annotations
@@ -43,8 +43,24 @@ def write_run_metadata(directory: str, cfg, run_name: str,
     the format - the data files' own layouts are fixed by compatibility.
     Names are stored bare, without the UI's "CH n - " prefix. The note is the
     operator's own words from record time - what was tested, beam energy -
-    the context no register readback can supply."""
+    the context no register readback can supply.
+
+    A CAMPAIGN folder holds several run_<N>.root files, so the sidecar keeps
+    a per-run entry under "runs" (note, started, events) while the top-level
+    fields always describe the LATEST recording - which is what the listing
+    shows, and exactly right for the single-run folders too."""
+    path = os.path.join(directory, "run_metadata.json")
+    try:
+        with open(path) as f:
+            existing = json.load(f)
+        per_run = existing.get("runs") if isinstance(existing, dict) else None
+        per_run = dict(per_run) if isinstance(per_run, dict) else {}
+    except (OSError, ValueError):
+        per_run = {}
+    if run_number is not None:
+        per_run[str(run_number)] = {"note": note, "started": time.time()}
     meta = {
+        "runs": per_run,
         "run_name": run_name,
         "run_number": run_number,
         "note": note,
@@ -70,7 +86,8 @@ def write_run_metadata(directory: str, cfg, run_name: str,
         json.dump(meta, f, indent=2)
 
 
-def stamp_run_end(directory: str, events: int) -> None:
+def stamp_run_end(directory: str, events: int,
+                  run_number: int | None = None) -> None:
     """Final event count into the sidecar, so a listing can show it without
     opening every data file. Losing it only costs the listing an event count,
     so it must never take a close down - but it is worth a line in the log,
@@ -81,6 +98,9 @@ def stamp_run_end(directory: str, events: int) -> None:
             meta = json.load(f)
         meta["events"] = events
         meta["ended"] = time.time()
+        entry = (meta.get("runs") or {}).get(str(run_number))
+        if entry is not None:            # the campaign folder's per-run record
+            entry["events"] = events
         with open(path, "w") as f:
             json.dump(meta, f, indent=2)
     except (OSError, ValueError) as e:
@@ -174,7 +194,7 @@ class WaveDumpWriter(Writer):
                           "last events may be missing: %s", ch, e)
         self._files = {}
         if self._cfg is not None:
-            stamp_run_end(self._dir, self._events)
+            stamp_run_end(self._dir, self._events, self._run_number)
 
 
 class RootWriter(Writer):
@@ -317,7 +337,7 @@ class RootWriter(Writer):
                 self._file.close()
                 self._file = None
         if self._cfg is not None:
-            stamp_run_end(self._dir, self._events)
+            stamp_run_end(self._dir, self._events, self._run_number)
 
 
 def make_writer(directory: str, run_name: str = "",

@@ -4,6 +4,7 @@ averaged waveforms for all enabled channels + a rolling trigger-rate window)."""
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import time
 
@@ -572,7 +573,8 @@ class AcquisitionEngine:
     def start_recording(self, name: str, timestamp: bool = True,
                         run_number: int | None = None,
                         max_events: int | None = None,
-                        note: str = "") -> dict:
+                        note: str = "",
+                        into_existing: bool = False) -> dict:
         """Begin writing to a new run directory, starting acquisition if the
         operator has not already. Watching and recording are separate actions.
 
@@ -600,19 +602,45 @@ class AcquisitionEngine:
                 rec.done("Not started: acquisition would not start")
                 return {"ok": False,
                         "error": "acquisition would not start - see the errors below"}
-            try:
-                run_id, path = runs.create(name, timestamp)
-            except FileExistsError as e:
-                rec.done(f"Not started: a run named {e.args[0]!r} already exists")
-                return {"ok": False,
-                        "error": f"a run named {e.args[0]!r} already exists - "
-                                 f"rename it or switch the timestamp on"}
-            except OSError as e:
-                rec.done(f"Not started: could not create the run directory: {e}")
-                self._record_error(f"record: {e}")
-                return {"ok": False, "error": f"could not create the run directory: {e}"}
             with self._lock:
                 cfg = self._cfg
+            if into_existing:
+                # A CAMPAIGN folder: the setup has not changed, so the new
+                # run_<N>.root joins the earlier ones instead of scattering
+                # one-directory-per-run. Only the numbered ROOT files can
+                # share a directory - the WaveDump layout's wave_<ch>
+                # filenames would overwrite the earlier run.
+                path = runs.path_of(name)
+                if path is None:
+                    rec.done(f"Not started: no run folder named {name!r}")
+                    return {"ok": False,
+                            "error": f"no run folder named {name!r}"}
+                if cfg.output_format != "root":
+                    rec.done("Not started: only ROOT runs can share a folder")
+                    return {"ok": False,
+                            "error": "only ROOT output can add runs to an "
+                                     "existing folder - WaveDump filenames "
+                                     "would overwrite the earlier run"}
+                if os.path.exists(os.path.join(path, f"run_{run_number}.root")):
+                    rec.done(f"Not started: run {run_number} is already there")
+                    return {"ok": False,
+                            "error": f"run_{run_number}.root already exists "
+                                     f"in {name!r} - pick another number"}
+                run_id = name
+            else:
+                try:
+                    run_id, path = runs.create(name, timestamp)
+                except FileExistsError as e:
+                    rec.done(f"Not started: a run named {e.args[0]!r} already exists")
+                    return {"ok": False,
+                            "error": f"a run named {e.args[0]!r} already exists - "
+                                     f"rename it, switch the timestamp on, or "
+                                     f"pick it from the list to add this run "
+                                     f"to that folder"}
+                except OSError as e:
+                    rec.done(f"Not started: could not create the run directory: {e}")
+                    self._record_error(f"record: {e}")
+                    return {"ok": False, "error": f"could not create the run directory: {e}"}
             writer = make_writer(path, run_id, cfg.output_format, run_number,
                                  note)
             try:
@@ -620,8 +648,10 @@ class AcquisitionEngine:
                 logsetup.did(log, "Creating the run directory", path)
             except Exception as e:
                 # The directory exists but holds nothing; leaving it behind puts
-                # an empty run in the listing that was never recorded.
-                runs.discard_empty(run_id)
+                # an empty run in the listing that was never recorded. NEVER
+                # when reusing a campaign folder - it holds earlier runs.
+                if not into_existing:
+                    runs.discard_empty(run_id)
                 rec.done(f"Not started: could not open the run files: {e}")
                 self._record_error(f"record: {e}")
                 return {"ok": False, "error": str(e)}

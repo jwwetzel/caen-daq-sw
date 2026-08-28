@@ -585,6 +585,9 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
   border: 1px solid var(--border); border-radius: 5px; padding: 7px 9px;
 }
 .rec-modal .muted { font-size: 11px; margin: 6px 0 10px; }
+/* Where this recording will land - a new folder, or joining a campaign. */
+.rec-dest { font-size: 11px; color: var(--muted); margin: -4px 0 8px; }
+.rec-dest.into { color: var(--orange, #d29922); }
 .modal-btns { display: flex; justify-content: flex-end; gap: 8px; }
 
 /* guided tour: dim everything, cut a hole over the thing being explained */

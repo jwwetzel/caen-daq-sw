@@ -200,7 +200,8 @@ def create_app(engine: AcquisitionEngine) -> FastAPI:
         # pasted logbook cannot balloon the sidecar.
         note = str(p.get("note") or "").strip()[:2000]
         r = engine.start_recording((p.get("name") or "").strip(),
-                                   bool(p.get("timestamp", True)), rn, me, note)
+                                   bool(p.get("timestamp", True)), rn, me, note,
+                                   into_existing=bool(p.get("into_existing")))
         return {**r, "status": engine.status()}
 
     @app.post("/api/rec/stop")

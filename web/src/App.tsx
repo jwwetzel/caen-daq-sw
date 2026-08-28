@@ -62,6 +62,10 @@ export function App() {
   // would be worse than none.
   const [recDialog, setRecDialog] = useState(false);
   const [recNote, setRecNote] = useState("");
+  // Existing run folders feed the run-name dropdown: picking one (with the
+  // timestamp off) records INTO it - runs of an unchanged setup stay in one
+  // campaign folder instead of scattering one directory per run.
+  const [runDirs, setRunDirs] = useState<string[]>([]);
   // The TR0 baseline marker's memory: the last MEASURED baseline and the
   // offset DAC it was measured under. The measured and bench-predicted
   // baselines disagree by ~200 mV on this unit, so falling back to
@@ -108,6 +112,12 @@ export function App() {
   }, []);
 
   useEffect(() => { loadOnce(); }, [loadOnce]);
+
+  // Keep the run-name dropdown in step with what is on disk; runsKey bumps
+  // whenever a recording starts or stops.
+  useEffect(() => {
+    api.runs().then((r) => setRunDirs(r.runs.map((x) => x.id))).catch(() => {});
+  }, [runsKey]);
 
   const asWaveMode = (v: DisplayPrefs["wave_mode"]): WaveMode =>
     v === "overlay" || v === "scope" ? v : "avg";
@@ -330,6 +340,11 @@ export function App() {
       failed("Could not fire test triggers")(e);
     }
   };
+  // Timestamp OFF and the name matches a folder on disk: this recording
+  // joins that folder (run_<N>.root added alongside) instead of failing on
+  // the clash or minting yet another directory.
+  const intoExisting = !stampRun && runDirs.includes(runName.trim());
+
   const startRec = async () => {
     setRecDialog(false);
     try {
@@ -338,7 +353,7 @@ export function App() {
       const r = await api.recStart(runName, stampRun,
                                    Number.isFinite(n as number) ? n : null,
                                    Number.isFinite(m as number) ? m : null,
-                                   recNote.trim());
+                                   recNote.trim(), intoExisting);
       setStatus(r.status);
       if (!r.ok) push("err", "Could not start recording", [r.error ?? "no reason given"]);
       else {
@@ -448,9 +463,13 @@ export function App() {
               <>
                 <label className="rec-label" htmlFor="runname">Run name</label>
                 <input id="runname" className="rec-input" placeholder="e.g. cosmics" value={runName}
-                  disabled={!connected}
+                  disabled={!connected} list="run-dirs"
+                  title="Pick an existing folder (with the timestamp off) to add this run to it, or type a new name for a new folder"
                   onChange={(e) => setRunName(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") setRecDialog(true); }} />
+                <datalist id="run-dirs">
+                  {runDirs.map((d) => <option key={d} value={d} />)}
+                </datalist>
                 <label className="rec-label" htmlFor="runno"
                   title="The analysis-facing run number (run_N.root). Prefilled with one past the highest number in the data directory; type to override.">
                   Run #
@@ -797,6 +816,11 @@ export function App() {
               {runName.trim() ? ` · ${runName.trim()}` : ""}
               {recMax.trim() ? ` · ${recMax.trim()} events` : ""}
             </h3>
+            <p className={"rec-dest " + (intoExisting ? "into" : "")}>
+              {intoExisting
+                ? `Adds run_${runNo.trim() || status?.next_run_number}.root to the existing folder`
+                : "Creates a new run folder"}
+            </p>
             <textarea autoFocus rows={4} maxLength={2000} value={recNote}
               placeholder="What is this run? Tested device, beam energy, HV, conditions..."
               onChange={(e) => setRecNote(e.target.value)}
