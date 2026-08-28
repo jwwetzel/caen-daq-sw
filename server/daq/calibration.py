@@ -45,11 +45,13 @@ RAIL_LO, RAIL_HI = 2, ADC_TOP - 2    # excursions here mean "clipped, or worse"
 # lowers the baseline). Replaced by the measured secant after one step.
 SLOPE_CH = -0.125
 SLOPE_TR = -0.19
-# TR threshold DAC: window counts per LSB (RADiCAL bench cal, 0.0329 mV/LSB).
-# The comparator lives in the window frame, so moving the TR offset moves the
-# baseline relative to a fixed threshold; keeping the operator's margin means
-# the threshold must follow the offset by the predicted baseline shift.
-TR_THR_COUNTS_PER_LSB = 0.0329 * 4.096
+# TR threshold coupling, MEASURED on serial 53364 (2026-08-28, spectrum-edge
+# calibration): the comparator's true response is ~0.00494 mV per threshold
+# LSB - seven times more compressed than the RADiCAL bench constant - while
+# the offset moves the input by -0.0464 mV/LSB. Keeping the operator's margin
+# across an offset move therefore takes ~9.4 threshold LSBs per offset LSB.
+TR_THR_TRUE_MV_PER_LSB = 0.00494
+TR_COUPLING_LSB_PER_OFF_LSB = -0.0464 / TR_THR_TRUE_MV_PER_LSB
 
 TR_KEY = "TR0"
 
@@ -250,7 +252,7 @@ class Calibrator:
                 # mistake that silenced the trigger the first time
                 # auto-baseline ran.
                 old = cfg.groups[0].fast_trigger_dc_offset
-                d_thr = round(SLOPE_TR * (s.dac - old) / TR_THR_COUNTS_PER_LSB)
+                d_thr = round(TR_COUPLING_LSB_PER_OFF_LSB * (s.dac - old))
                 for g in cfg.groups:      # one TR0, both banks' registers
                     g.fast_trigger_dc_offset = s.dac
                     g.fast_trigger_threshold = int(min(0xFFFF, max(

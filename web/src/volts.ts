@@ -38,16 +38,37 @@ export function trThresholdCounts(thrDac: number): number {
   return 2048 + (thrDac - TR_THR_ZERO_DAC) * TR_THR_COUNTS_PER_LSB;
 }
 
-/** The threshold DAC that puts the trigger `relV` volts from the baseline the
- *  current offset predicts - how the operator thinks ("trigger at -100 mV"). */
-export function trThresholdDacFor(relV: number, offDac: number, g: Geom): number {
-  const target = trBaselineCounts(offDac) + relV * (g.adc_max + 1);
-  const dac = Math.round(TR_THR_ZERO_DAC + (target - 2048) / TR_THR_COUNTS_PER_LSB);
+/** The comparator's TRUE response, measured on serial 53364 (2026-08-28) by
+ *  the spectrum-edge method: record runs at two threshold DACs and read the
+ *  sharp lower edge of the accepted MCP pulse-depth distribution - the one
+ *  observable the analog comparator has. DAC 33731 cut at -222 mV below
+ *  baseline and DAC 37983 at -201 mV, so the real scale is ~0.005 mV/LSB -
+ *  SEVEN times more compressed than the bench constant above. The bench
+ *  numbers remain only for the window-frame plot marker; the operator-facing
+ *  relative-threshold field speaks the measured truth. Anchored at TR offset
+ *  DAC 25815; re-measure the anchor if the offset moves far from there. */
+export const TR_THR_TRUE_MV_PER_LSB = 0.00494;
+export const TR_THR_ANCHOR_DAC = 33731;
+export const TR_THR_ANCHOR_REL_MV = -222;
+/** Threshold-DAC LSBs per offset-DAC LSB that hold the operator's margin
+ *  when the TR offset moves: the offset shifts the input by -0.0464 mV/LSB,
+ *  and each threshold LSB is worth only 0.00494 true mV - so the threshold
+ *  must chase ~9.4x as many LSBs as the offset moved. */
+export const TR_COUPLING_LSB_PER_OFF_LSB = -0.0464 / TR_THR_TRUE_MV_PER_LSB;
+
+/** The threshold DAC that puts the trigger `relV` volts from the baseline -
+ *  how the operator thinks ("trigger at -140 mV") - through the MEASURED
+ *  comparator response, not the bench model that once armed -235 mV when
+ *  -140 was typed. */
+export function trThresholdDacFor(relV: number, _offDac: number, _g: Geom): number {
+  const dac = Math.round(TR_THR_ANCHOR_DAC
+    + (relV * 1000 - TR_THR_ANCHOR_REL_MV) / TR_THR_TRUE_MV_PER_LSB);
   return Math.min(0xFFFF, Math.max(0, dac));
 }
 
-export function trRelThresholdV(thrDac: number, offDac: number, g: Geom): number {
-  return (trThresholdCounts(thrDac) - trBaselineCounts(offDac)) / (g.adc_max + 1);
+export function trRelThresholdV(thrDac: number, _offDac: number, _g: Geom): number {
+  return (TR_THR_ANCHOR_REL_MV
+    + (thrDac - TR_THR_ANCHOR_DAC) * TR_THR_TRUE_MV_PER_LSB) / 1000;
 }
 
 /** Where 0 V lands in ADC counts for a given DC offset. */

@@ -21,7 +21,7 @@ import { ConnectionBadge } from "./components/ConnectionBadge";
 import { STATUS_POLL_MS } from "./types";
 import { PERSIST_TRACES } from "./waveDensity";
 import { BlurInput } from "./components/BlurInput";
-import { TR_OFF_SLOPE_COUNTS, TR_THR_COUNTS_PER_LSB, trRelThresholdV,
+import { TR_COUPLING_LSB_PER_OFF_LSB, TR_OFF_SLOPE_COUNTS, trRelThresholdV,
          trThresholdDacFor, windowVolts } from "./volts";
 
 export function App() {
@@ -283,7 +283,7 @@ export function App() {
       // preserved, and calibration can never strand the trigger.
       const old = config.groups[0].fast_trigger_dc_offset;
       const dThr = Math.round(
-        TR_OFF_SLOPE_COUNTS * (value - old) / TR_THR_COUNTS_PER_LSB);
+        TR_COUPLING_LSB_PER_OFF_LSB * (value - old));
       const groups = config.groups.map((gc) => ({
         ...gc,
         fast_trigger_dc_offset: value,
@@ -617,16 +617,16 @@ export function App() {
               ? mem.counts + TR_OFF_SLOPE_COUNTS
                   * (trGroup.fast_trigger_dc_offset - mem.dac)
               : 2048 + (trGroup.fast_trigger_dc_offset - 32768) * TR_OFF_SLOPE_COUNTS;
-            // Trigger: the comparator lives in the WINDOW frame - deduced
-            // from the observed fact that moving the TR offset changes the
-            // trigger margin - so its line is a function of the threshold
-            // DAC alone (RADiCAL cal: 0.0329 mV/LSB, zero at 25448),
-            // independent of the offset. Constants provisional until the
-            // comparator-domain experiment refines them.
+            // Trigger: drawn RELATIVE to the baseline marker through the
+            // MEASURED comparator response (spectrum-edge calibration,
+            // serial 53364) - where a pulse must actually reach to fire.
+            // The old window-frame model (0.0329 mV/LSB) put this line 7x
+            // too shallow and drifted off-plot at real threshold DACs.
+            const baseV = windowVolts(baseCounts, catalog.geometry);
             const markers = [
-              { v: windowVolts(baseCounts, catalog.geometry),
-                label: "baseline", color: "#4ac776" },
-              { v: (trGroup.fast_trigger_threshold - 25448) * 0.0329 / 1000,
+              { v: baseV, label: "baseline", color: "#4ac776" },
+              { v: baseV + trRelThresholdV(trGroup.fast_trigger_threshold,
+                    trGroup.fast_trigger_dc_offset, catalog.geometry),
                 label: "trigger", color: "#f85149" },
             ];
             return (
