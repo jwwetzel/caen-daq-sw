@@ -451,6 +451,15 @@ def test_stale_config_push_is_refused_and_returns_the_truth():
         eng.close()
 
 
+def test_connection_sounds_never_raise():
+    """The chirps are a courtesy. No audio device, no sound files, not on
+    Windows - none of it may ever raise into the readout path."""
+    from daq import sounds
+    sounds.play("connected")
+    sounds.play("disconnected")
+    sounds.play("no-such-event")
+
+
 def test_run_note_lands_in_the_metadata_sidecar():
     """The record dialog's note - what was tested, beam energy - is stored
     verbatim in run_metadata.json, where the listing and the analysis read

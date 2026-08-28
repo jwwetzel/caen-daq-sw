@@ -259,7 +259,13 @@ class RootWriter(Writer):
         # (test-beam convention), inferred or set at record time.
         fname = (f"run_{self._run_number}.root" if self._run_number
                  else "waveforms.root")
-        self._file = uproot.recreate(os.path.join(self._dir, fname))
+        # ZSTD(1), NOT the default zlib: measured on this machine, zlib costs
+        # 3.96 ms/event (a 253 Hz recording ceiling - the whole pipeline's
+        # bottleneck) while ZSTD(1) costs 0.17 ms at a similar ratio, faster
+        # even than writing uncompressed because less hits the disk. Beam
+        # time is the expensive resource here, never bytes.
+        self._file = uproot.recreate(os.path.join(self._dir, fname),
+                                     compression=uproot.ZSTD(1))
         self._tree = self._file.mktree(
             "pulse",
             {"event": np.int32, "trigger_time_tag": np.uint32,

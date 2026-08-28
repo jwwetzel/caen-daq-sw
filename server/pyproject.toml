@@ -57,4 +57,4 @@ include = ["daq*"]
 # serves a 404 for its own UI. The release workflow asserts index.html is in the
 # wheel so this can never silently regress.
 [tool.setuptools.package-data]
-daq = ["static/index.html", "static/**/*"]
+daq = ["static/index.html", "static/**/*", "sounds/*.wav"]

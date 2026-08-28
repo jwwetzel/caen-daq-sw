@@ -17,6 +17,7 @@ from .writer import make_writer
 from . import runs
 from . import constants as C
 from . import logsetup
+from . import sounds
 
 
 log = logsetup.get("daq.acq")
@@ -151,8 +152,16 @@ class AcquisitionEngine:
             # Last, not first: while this is False every other path treats the
             # unit as absent and keeps off the wire, so nothing talks to a board
             # that is still being set up.
-            self._opened = True
+            self._mark_opened(True)
             return self._board_info
+
+    def _mark_opened(self, opened: bool) -> None:
+        """The one gate for connection-state flips, so the audible chirps
+        track every REAL transition and never fire twice for one event."""
+        was = self._opened
+        self._opened = opened
+        if opened != was:
+            sounds.play("connected" if opened else "disconnected")
 
     def get_config(self) -> BoardConfig:
         """A COPY, deliberately: callers mutate what they get (the calibrator,
@@ -500,7 +509,7 @@ class AcquisitionEngine:
                              level=logging.ERROR)
                 self._record_error(f"close: {e}")
             finally:
-                self._opened = False
+                self._mark_opened(False)
 
     # ---------- connection health ----------
     def probe(self) -> bool:
@@ -520,7 +529,7 @@ class AcquisitionEngine:
                 alive = False
             if alive:
                 return True
-            self._opened = False
+            self._mark_opened(False)
             self._board_info = BoardInfo()
             self._record_error("board stopped responding")
         self._try_open(force=False)
@@ -530,7 +539,7 @@ class AcquisitionEngine:
         """Explicit user-driven reconnect: drop what we have and open again now."""
         with logsetup.step(log, "Reconnecting to the unit") as reconnecting:
             self.stop()
-            self._opened = False
+            self._mark_opened(False)
             self._try_open(force=True)
             reconnecting.done("Reconnected" if self._opened else "No unit found")
         return self.status()
@@ -707,7 +716,7 @@ class AcquisitionEngine:
                 self._record_error(f"read: {e}")
                 if fails >= C.READ_FAIL_LIMIT:
                     self._record_error("board stopped responding - acquisition halted")
-                    self._opened = False
+                    self._mark_opened(False)
                     self._board_info = BoardInfo()
                     self._running.clear()
                     break
