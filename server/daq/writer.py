@@ -81,6 +81,15 @@ def write_run_metadata(directory: str, cfg, run_name: str,
         "record_length": cfg.record_length,
         "post_trigger": cfg.post_trigger,
         "output_format": cfg.output_format,
+        # The trigger provenance: which comparator settings selected these
+        # events. Reconstructing a day's threshold scans from session
+        # history once, painfully, is why this is recorded per run.
+        "trigger": {
+            "edge": cfg.trigger_edge,
+            "groups": [{"fast_trigger_threshold": g.fast_trigger_threshold,
+                        "fast_trigger_dc_offset": g.fast_trigger_dc_offset}
+                       for g in cfg.groups],
+        },
     }
     with open(os.path.join(directory, "run_metadata.json"), "w") as f:
         json.dump(meta, f, indent=2)

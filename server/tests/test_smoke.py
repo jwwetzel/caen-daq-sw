@@ -494,6 +494,9 @@ def test_run_note_lands_in_the_metadata_sidecar():
             meta = json.load(f)
         assert meta["note"] == "LuAG, 3 GeV e-"
         assert meta["run_number"] == 7
+        # Trigger provenance rides with every run - reconstructing which
+        # threshold selected a run's events from session history is misery.
+        assert meta["trigger"]["groups"][0]["fast_trigger_threshold"] == 20000
         # A campaign folder: a second recording into the same directory keeps
         # BOTH runs' notes and event counts, while the top level tracks the
         # latest - which is also what single-run folders always showed.
