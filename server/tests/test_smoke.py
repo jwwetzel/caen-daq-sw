@@ -306,15 +306,21 @@ def test_amplitude_corrections_and_true_times():
 
 def test_root_writer_matches_the_radical_layout():
     """waveforms.root must read back with the structure the group's testbeam
-    analysis expects (tb_fnal_radical drs2root): TTree 'pulse' with event/I,
-    channel[18][1024]/F and times[2][1024]/F - and the sample values intact."""
+    analysis expects (tb_fnal_radical drs2root/maketree.cc): TTree 'pulse',
+    channel[18][1024]/F in maketree's INTERLEAVED slot order (group*9 + ch,
+    TR/MCP copies at slots 8 and 17) and its mV amplitude convention. An
+    earlier writer put the TR copies at 16/17 - an analysis reading slot 8
+    as the MCP would have gotten a signal channel instead."""
     import uproot
     from daq.writer import make_writer
     from daq.backend.base import Event
     from daq.config import default_config
 
+    mv = lambda counts: (counts / 4095.0 - 0.5) * 1000.0
     cfg = default_config()
     cfg.output_format = "root"
+    for g in cfg.groups:
+        g.enabled = True          # both banks: the slot map spans all 18
     with tempfile.TemporaryDirectory() as d:
         w = make_writer(d, "root-test", cfg.output_format)
         w.open(cfg)
@@ -323,6 +329,9 @@ def test_root_writer_matches_the_radical_layout():
             samples = {ch: np.full(C.RECORD_LENGTH, 100.0 * i + ch,
                                    dtype=np.float32)
                        for ch in cfg.enabled_channels()}
+            if i == 2:                       # the decoder's TR copies, 16/17
+                samples[16] = np.full(C.RECORD_LENGTH, 60.0, dtype=np.float32)
+                samples[17] = np.full(C.RECORD_LENGTH, 61.0, dtype=np.float32)
             w.write(Event(index=i, timestamp_s=0.0, trigger_time_tag=7 * i,
                           samples=samples, trigger_cells={0: 100 + i},
                           times_ns={0: true_t} if i == 2 else None))
@@ -335,8 +344,15 @@ def test_root_writer_matches_the_radical_layout():
             assert a["event"].tolist() == [0, 1, 2]
             assert a["channel"].shape == (3, 18, C.RECORD_LENGTH)
             assert a["times"].shape == (3, 2, C.RECORD_LENGTH)
-            assert a["channel"][2][5][0] == 205.0        # event 2, ch 5
-            assert a["channel"][0][17].max() == 0.0      # TR trace: zero for now
+            # Group 0 signal channels land at slots 0-7 unchanged...
+            assert abs(a["channel"][2][5][0] - mv(205.0)) < 1e-3
+            # ...group 1's shift by one: decoder ch 8 is slot 9...
+            assert abs(a["channel"][1][9][0] - mv(108.0)) < 1e-3
+            assert abs(a["channel"][1][16][0] - mv(115.0)) < 1e-3
+            # ...and the TR/MCP copies sit at maketree's slots 8 and 17.
+            assert abs(a["channel"][2][8][0] - mv(60.0)) < 1e-3
+            assert abs(a["channel"][2][17][0] - mv(61.0)) < 1e-3
+            assert a["channel"][0][8].max() == 0.0    # no TR in that event
             # 5 GS/s: 0.2 ns per sample, so sample 10 sits at 2 ns.
             assert abs(a["times"][0][0][10] - 2.0) < 1e-6
             assert a["tc"][1][0] == 101                  # trigger cell recorded
@@ -344,6 +360,11 @@ def test_root_writer_matches_the_radical_layout():
             # group 1 keeps the uniform default.
             assert abs(a["times"][2][0][10] - 2.1) < 1e-5
             assert abs(a["times"][2][1][10] - 2.0) < 1e-6
+
+        meta = json.load(open(os.path.join(d, "run_metadata.json")))
+        # The per-run record of the mapping, so no analysis ever guesses.
+        assert meta["channels"]["8"]["root_slot"] == 9
+        assert "slot = group*9" in meta["root_channel_layout"]
 
         meta = json.load(open(os.path.join(d, "run_metadata.json")))
         assert meta["events"] == 3 and meta["output_format"] == "root"

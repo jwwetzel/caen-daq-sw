@@ -21,6 +21,7 @@ import time
 import numpy as np
 
 from .backend.base import Event
+from . import constants as C
 from . import logsetup
 
 log = logsetup.get("daq.writer")
@@ -48,9 +49,16 @@ def write_run_metadata(directory: str, cfg, run_name: str,
         "run_number": run_number,
         "note": note,
         "started": time.time(),
+        # Where each channel lands in the ROOT file's channel[18] array -
+        # maketree's interleaved order, TR/MCP copies at slots 8 and 17.
+        # Recorded per run so an analysis never has to guess the mapping.
+        "root_channel_layout": "slot = group*9 + ch_in_group; slots 8 and 17 "
+                               "are the TR0 (MCP) copies; amplitudes in mV = "
+                               "1000*(counts/4095 - 0.5)",
         "channels": {
             str(ch): {"name": cfg.channels[ch].name,
-                      "dc_offset": cfg.channels[ch].dc_offset}
+                      "dc_offset": cfg.channels[ch].dc_offset,
+                      "root_slot": (ch // 8) * 9 + (ch % 8)}
             for ch in cfg.enabled_channels()
         },
         "drs4_frequency": cfg.drs4_frequency,
@@ -178,18 +186,28 @@ class RootWriter(Writer):
     drop straight into that analysis:
 
       event/I               event number
-      channel[18][1024]/F   16 signal channels + the two TR traces
+      channel[18][1024]/F   slot = group*9 + ch, amplitudes in mV (below)
       times[2][1024]/F      per-group sample times, ns
       tc[2]/s               per-group DRS4 start cell (trigger cell)
+
+    The channel slots are maketree's INTERLEAVED 9-per-group order
+    (`totalIndex = realGroup*9 + i`, i = 0..8 with the TR copy at 8):
+
+      0-7   group 0 signal channels          9-16  group 1 signal channels
+      8     group 0's TR0 copy (the MCP)     17    group 1's TR0 copy
+
+    NOT 16 signal channels then two TR traces - an earlier version wrote
+    that, and it would have sent an analysis reading slot 8 as the MCP to a
+    signal channel instead. Amplitudes are maketree's convention too:
+    window-referenced mV, 1000*(counts/4095 - 0.5), so -500..+500 mV with
+    the window centre at 0.
 
     In "timing" correction mode the times branch carries each event's TRUE
     non-uniform axis, exactly as maketree produces - full timing precision,
     no converter. In "auto" mode times are uniform steps, which is what the
     library's resampling time correction leaves behind. tc is recorded in
-    every mode so the two paths can be cross-checked. One honest deviation:
-    TR traces (indices 16, 17) are zero until TR decoding lands - the
-    decoder skips them, see CLAUDE.md. trigger_time_tag rides along as an
-    extra branch.
+    every mode so the two paths can be cross-checked. trigger_time_tag
+    rides along as an extra branch.
 
     Events are buffered and written in batches so baskets stay a sane size;
     a stream of one-event extends would bloat the file and the read path.
@@ -234,12 +252,30 @@ class RootWriter(Writer):
         write_run_metadata(self._dir, cfg, self._run_name, self._run_number,
                            self._note)
 
+    @staticmethod
+    def root_slot(ch: int) -> int:
+        """maketree's flat slot for the decoder's channel numbering.
+
+        The decoder counts signal channels 0-15 and the TR copies 16/17;
+        maketree interleaves per group with the TR copy at in-group index 8.
+        This is the one place the two numberings meet - everything else in
+        the app speaks decoder numbers."""
+        if ch >= C.NUM_CHANNELS:               # decoder TR indices 16/17
+            return (ch - C.NUM_CHANNELS) * 9 + 8
+        return (ch // 8) * 9 + (ch % 8)
+
+    @staticmethod
+    def to_mv(wave) -> np.ndarray:
+        """maketree's amplitude convention: window-referenced millivolts."""
+        return ((np.asarray(wave, dtype=np.float32) / 4095.0) - 0.5) * 1000.0
+
     def write(self, ev: Event) -> None:
         n = self._cfg.record_length
         chans = np.zeros((self.N_CHANNELS_OUT, n), dtype=np.float32)
         for ch, wave in ev.samples.items():
-            if 0 <= ch < self.N_CHANNELS_OUT:
-                chans[ch, :len(wave)] = wave
+            slot = self.root_slot(ch)
+            if 0 <= slot < self.N_CHANNELS_OUT:
+                chans[slot, :len(wave)] = self.to_mv(wave)
         # True per-event times when the correction mode produced them
         # ("timing"); the uniform axis otherwise.
         times = self._times
