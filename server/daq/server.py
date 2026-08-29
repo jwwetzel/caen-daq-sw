@@ -137,6 +137,20 @@ def create_app(engine: AcquisitionEngine) -> FastAPI:
         sessions.set_display(payload or {})
         return {"ok": True}
 
+    @app.get("/api/conditions")
+    def get_conditions():
+        """The operator's key=value experiment facts (beam energy, SiPM bias,
+        capillary map...). The DAQ carries them and snapshots them into every
+        run's metadata; it never interprets them."""
+        return {"items": sessions.get_conditions()}
+
+    @app.put("/api/conditions")
+    def put_conditions(payload: dict):
+        items = payload.get("items") if isinstance(payload, dict) else None
+        if not isinstance(items, list):
+            raise HTTPException(400, "expected {\"items\": [{key, value}, ...]}")
+        return {"ok": True, "items": sessions.set_conditions(items)}
+
     @app.get("/api/sessions")
     def list_sessions():
         return {"sessions": sessions.listing()}
@@ -164,6 +178,8 @@ def create_app(engine: AcquisitionEngine) -> FastAPI:
             cfg, errs = engine.set_config(BoardConfig.from_dict(s["config"]))
             if isinstance(s.get("display"), dict):
                 sessions.set_display(s["display"])
+            if isinstance(s.get("conditions"), list):
+                sessions.set_conditions(s["conditions"])
             st = engine.status()
             applying.done("Applied with errors" if errs else
                           ("Applied and read back" if st["opened"]

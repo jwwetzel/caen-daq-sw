@@ -483,6 +483,32 @@ def test_connection_sounds_never_raise():
     sounds.play("no-such-event")
 
 
+def test_conditions_round_trip_and_snapshot_into_runs():
+    """The operator's key=value experiment facts: stored ordered, empty keys
+    dropped, and snapshotted BY VALUE into each run's metadata - so editing
+    them later never rewrites what was true for an already-taken run."""
+    from daq import sessions
+    from daq.writer import write_run_metadata
+    with tempfile.TemporaryDirectory() as d:
+        orig = sessions._conditions_path
+        sessions._conditions_path = lambda: os.path.join(d, "conditions.json")
+        try:
+            saved = sessions.set_conditions([
+                {"key": "Capillary 1", "value": "DSB1 1911"},
+                {"key": "XCET 40", "value": "40 bar"},
+                {"key": "  ", "value": "dropped - blank key"},
+            ])
+            assert [c["key"] for c in saved] == ["Capillary 1", "XCET 40"]
+            assert sessions.get_conditions() == saved
+            write_run_metadata(d, default_config(), "beam", 9, "n", saved)
+            with open(os.path.join(d, "run_metadata.json")) as f:
+                meta = json.load(f)
+            assert meta["experiment"][0]["value"] == "DSB1 1911"
+            assert meta["runs"]["9"]["experiment"][1]["key"] == "XCET 40"
+        finally:
+            sessions._conditions_path = orig
+
+
 def test_run_note_lands_in_the_metadata_sidecar():
     """The record dialog's note - what was tested, beam energy - is stored
     verbatim in run_metadata.json, where the listing and the analysis read

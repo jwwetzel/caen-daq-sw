@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+﻿import { useCallback, useEffect, useRef, useState } from "react";
 import { api, openTelemetry } from "./api";
-import type { DisplayPrefs, WaveMode } from "./api";
+import type { Condition, DisplayPrefs, WaveMode } from "./api";
+import { ConditionsPanel } from "./components/ConditionsPanel";
 import { SessionsPanel } from "./components/SessionsPanel";
 import { CalibrationPanel } from "./components/CalibrationPanel";
 import type { BoardConfig, Catalog, Status, Telemetry } from "./types";
@@ -23,6 +24,14 @@ import { PERSIST_TRACES } from "./waveDensity";
 import { BlurInput } from "./components/BlurInput";
 import { TR_OFF_MID_DAC, TR_OFF_SLOPE_COUNTS, trAbsThresholdV,
          trThresholdDacForAbs, windowVolts } from "./volts";
+
+// Settings the operator tunes WHILE WATCHING the live plots - trigger and
+// timing. Everything else in the unit catalog is campaign-tier: set once,
+// then protected on the Experiment view where a mid-run hand cannot brush it.
+const LIVE_UNIT_KEYS = new Set([
+  "post_trigger", "trigger_edge", "external_trigger", "fast_trigger",
+  "software_trigger", "fast_trigger_digitizing",
+]);
 
 export function App() {
   const [catalog, setCatalog] = useState<Catalog | null>(null);
@@ -62,6 +71,18 @@ export function App() {
   // would be worse than none.
   const [recDialog, setRecDialog] = useState(false);
   const [recNote, setRecNote] = useState("");
+  // The conditions snapshot shown in the confirm-setup dialog, fetched fresh
+  // each time it opens so it reflects the server's truth, not tab state.
+  const [recCond, setRecCond] = useState<Condition[]>([]);
+  // Live = watch and operate; Experiment = campaign setup, conditions, and
+  // everything you would hate to change by accident mid-campaign.
+  const [view, setView] = useState<"live" | "experiment">("live");
+  // The settings lock: lock everything with one button, unlock individual
+  // settings one at a time - deliberate exceptions, wholesale protection.
+  const [lockOn, setLockOn] = useState(false);
+  const [lockOpen, setLockOpen] = useState<Set<string>>(new Set());
+  const lockRef = useRef({ on: false, open: [] as string[] });
+  lockRef.current = { on: lockOn, open: [...lockOpen] };
   // Existing run folders feed the run-name dropdown: picking one (with the
   // timestamp off) records INTO it - runs of an unchanged setup stay in one
   // campaign folder instead of scattering one directory per run.
@@ -108,6 +129,8 @@ export function App() {
       // The display mode restores; the scope's trigger firing does NOT start
       // on page load - status.scope_hz says whether a scope is already live.
       setWaveMode(asWaveMode(d.wave_mode));
+      setLockOn(!!d.lock_on);
+      setLockOpen(new Set(Array.isArray(d.lock_open) ? d.lock_open : []));
     }).catch(() => {});
   }, []);
 
@@ -142,8 +165,32 @@ export function App() {
     displayTimer.current = window.setTimeout(() => {
       const y_ranges: Record<string, [number, number]> = {};
       for (const [k, v] of Object.entries(ranges)) y_ranges[k] = v;
-      api.setDisplay({ y_ranges, wave_mode: mode }).catch(() => {});
+      api.setDisplay({ y_ranges, wave_mode: mode,
+                       lock_on: lockRef.current.on,
+                       lock_open: lockRef.current.open }).catch(() => {});
     }, 400);
+  };
+
+  // The lock: keyed by setting ("post_trigger"), channel ("ch:5"), or
+  // activity ("calibration"). Locking all clears every exception - the
+  // whole point is that unlocks are deliberate, one at a time.
+  const isLocked = (key: string) => lockOn && !lockOpen.has(key);
+  const unlockOne = (key: string) => {
+    setLockOpen((prev) => {
+      const next = new Set(prev).add(key);
+      lockRef.current = { on: lockOn, open: [...next] };
+      saveDisplay(yRanges, waveMode);
+      return next;
+    });
+  };
+  const toggleLockAll = () => {
+    if (lockOn && !window.confirm(
+        "Unlock ALL settings? Individual unlocks are usually safer.")) return;
+    const on = !lockOn;
+    setLockOn(on);
+    setLockOpen(new Set());
+    lockRef.current = { on, open: [] };
+    saveDisplay(yRanges, waveMode);
   };
 
   const applyYRanges = (next: Record<number, [number, number]>) => {
@@ -326,6 +373,13 @@ export function App() {
       failed("Could not fire test triggers")(e);
     }
   };
+  // Opening the record dialog fetches the conditions fresh, so the
+  // confirm-setup review shows the server's truth at this moment.
+  const openRecDialog = () => {
+    api.conditions().then((r) => setRecCond(r.items)).catch(() => setRecCond([]));
+    setRecDialog(true);
+  };
+
   // Timestamp OFF and the name matches a folder on disk: this recording
   // joins that folder (run_<N>.root added alongside) instead of failing on
   // the clash or minting yet another directory.
@@ -410,6 +464,22 @@ export function App() {
     <div className="app">
       <header>
         <h1>DT5742B DAQ</h1>
+        <nav className="view-tabs" role="tablist" aria-label="View">
+          <button role="tab" aria-selected={view === "live"}
+            className={view === "live" ? "on" : ""}
+            onClick={() => setView("live")}>Live</button>
+          <button role="tab" aria-selected={view === "experiment"}
+            className={view === "experiment" ? "on" : ""}
+            title="Campaign setup: the settings and experiment facts that stay fixed for a whole campaign"
+            onClick={() => setView("experiment")}>Experiment</button>
+        </nav>
+        <button className={"lock-all" + (lockOn ? " on" : "")}
+          title={lockOn
+            ? "Settings are LOCKED. Unlock individual settings with their own lock icons; click here to unlock everything."
+            : "Lock every hardware setting against accidental edits. Unlock them one at a time afterwards."}
+          onClick={toggleLockAll}>
+          {lockOn ? "🔒 LOCKED" : "🔓 LOCK"}
+        </button>
         <ConnectionBadge status={status} serverUp={serverUp}
           busy={reconnecting} onReconnect={reconnect} />
         {/* Acquisition lives beside the connection state, away from the
@@ -419,7 +489,7 @@ export function App() {
         <div className="acq-group">
           {!running ? (
             <button className="primary" onClick={start} disabled={!connected}
-              title={connected ? "Watch live — nothing is written to disk"
+              title={connected ? "Watch live â€” nothing is written to disk"
                                : "No unit connected"}>
               Enable Acquisition
             </button>
@@ -441,7 +511,7 @@ export function App() {
                 <span className="rec-name mono">{tele?.run_id ?? status?.run_id}</span>
                 <span className="rec-count mono">
                   <Elapsed since={tele?.run_started ?? status?.run_started ?? null} />
-                  {" · "}{tele?.recorded ?? 0} ev
+                  {" Â· "}{tele?.recorded ?? 0} ev
                 </span>
                 <button className="danger" onClick={stopRec}>Stop recording</button>
               </>
@@ -452,7 +522,7 @@ export function App() {
                   disabled={!connected} list="run-dirs"
                   title="Pick an existing folder (with the timestamp off) to add this run to it, or type a new name for a new folder"
                   onChange={(e) => setRunName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") setRecDialog(true); }} />
+                  onKeyDown={(e) => { if (e.key === "Enter") openRecDialog(); }} />
                 <datalist id="run-dirs">
                   {runDirs.map((d) => <option key={d} value={d} />)}
                 </datalist>
@@ -464,7 +534,7 @@ export function App() {
                   placeholder={String(status?.next_run_number ?? "")}
                   value={runNo} disabled={!connected}
                   onChange={(e) => setRunNo(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") setRecDialog(true); }} />
+                  onKeyDown={(e) => { if (e.key === "Enter") openRecDialog(); }} />
                 <label className="rec-label" htmlFor="recmax"
                   title="Stop the recording automatically after this many events. Blank = record until stopped. Acquisition keeps running either way.">
                   for
@@ -472,13 +542,13 @@ export function App() {
                 <input id="recmax" className="rec-input rec-no" type="number" min={1}
                   placeholder="&#8734; ev" value={recMax} disabled={!connected}
                   onChange={(e) => setRecMax(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") setRecDialog(true); }} />
+                  onKeyDown={(e) => { if (e.key === "Enter") openRecDialog(); }} />
                 <label className="rec-stamp" title="Append the date and time, so runs of the same name never collide">
                   <input type="checkbox" checked={stampRun} disabled={!connected}
                     onChange={(e) => setStampRun(e.target.checked)} />
                   Include timestamp
                 </label>
-                <button className="record" onClick={() => setRecDialog(true)}
+                <button className="record" onClick={openRecDialog}
                   disabled={!connected}
                   title="Start writing this run to disk (asks for a run note first)">
                   <span className="rec-dot" />Record
@@ -494,14 +564,90 @@ export function App() {
       <div className="body">
         <fieldset className="hw-lock" disabled={!connected}
           title={connected ? undefined : "No unit connected"}>
+        {view === "experiment" ? (
+          <main className="experiment">
+            <div className="exp-grid">
+              <div className="exp-col">
+                <div className="card">
+                  <h2>Campaign Settings <span className="sub">set once, then lock</span></h2>
+                  <SettingsList
+                    defs={catalog.unit.filter((d) => !LIVE_UNIT_KEYS.has(d.key))}
+                    geom={catalog.geometry}
+                    get={(k) => (config as any)[k]} onChange={updateBoard}
+                    locked={isLocked} onUnlock={unlockOne} />
+                </div>
+                <Collapsible title="Bank Settings" defaultOpen>
+                  <BankPanel catalog={catalog} config={config}
+                    onGroupChange={updateGroup}
+                    locked={isLocked} onUnlock={unlockOne} />
+                </Collapsible>
+              </div>
+              <div className="exp-col">
+                <ConditionsPanel onError={(t, l) => push("err", t, l)} />
+                <SessionsPanel
+                  recording={recording}
+                  onSaved={(name) => push("ok", `Session "${name}" saved`)}
+                  onError={(title, lines) => push("err", title, lines)}
+                  onApplied={(cfg, display, errors, isConn, name) => {
+                    setConfig(cfg); confirmed.current = cfg;
+                    setYRanges(fromPrefs(display));
+                    setWaveMode(asWaveMode(display.wave_mode));
+                    if (!isConn) {
+                      push("warn", `Session "${name}": display restored`,
+                           ["No unit connected - hardware settings were not written."]);
+                    } else if (errors.length) {
+                      push("err", `Session "${name}" applied with errors`, errors);
+                    } else {
+                      push("ok", `Session "${name}" applied and read back from unit`);
+                    }
+                  }} />
+                <ConfigPanel
+                  onReset={async () => {
+                    try {
+                      const r = await api.resetDefault();
+                      setConfig(r.config); confirmed.current = r.config;
+                      if (r.connected === false) {
+                        push("warn", "No unit connected", ["Nothing was sent."]);
+                      } else if (r.errors?.length) {
+                        push("err", "Unit rejected part of the reset", r.errors);
+                      } else {
+                        push("ok", "Defaults applied and read back from unit");
+                      }
+                    } catch (e) {
+                      failed("Could not reset the settings")(e);
+                    }
+                  }}
+                  onLoaded={({ config: cfg, notes, errors, restart, connected: up, running: isRunning }) => {
+                    setConfig(cfg); confirmed.current = cfg;
+                    if (!up) {
+                      push("warn", "No unit connected", ["The file was read, but nothing was sent."]);
+                    } else if (errors.length) {
+                      push("err", "Unit rejected a setting from the file",
+                           [...errors, ...notes]);
+                    } else {
+                      push(notes.length ? "warn" : "ok",
+                           "Config loaded and read back from unit", notes);
+                    }
+                    if (restart.length && isRunning) {
+                      const what = restart.join(", ");
+                      if (confirm(`${what} only take effect when the unit is re-armed.\n\nRestart acquisition now?`)) {
+                        api.stop().then(() => api.start()).then(setStatus)
+                          .catch(failed("Could not re-arm the unit"));
+                      }
+                    }
+                  }} />
+              </div>
+            </div>
+          </main>
+        ) : (
         <main>
           <div className="grid-head">
             <h2>Channels <span className="sub">
               {waveMode === "avg"
-                ? `all 16 · avg ${tele?.avg_window_s ?? 1}s window · click a title to rename`
+                ? `all 16 Â· avg ${tele?.avg_window_s ?? 1}s window Â· click a title to rename`
                 : waveMode === "scope"
-                ? `all 16 · newest single trace, full resolution · click a title to rename`
-                : `all 16 · last ${PERSIST_TRACES} events, density-shaded · click a title to rename`}
+                ? `all 16 Â· newest single trace, full resolution Â· click a title to rename`
+                : `all 16 Â· last ${PERSIST_TRACES} events, density-shaded Â· click a title to rename`}
             </span></h2>
             <div className="wave-mode" role="group" aria-label="Waveform display mode">
               <button className={waveMode === "avg" ? "on" : ""}
@@ -561,7 +707,7 @@ export function App() {
                             setScopeTrigEdge(next);
                             applyScope(scopeHz, scopeTrigCh, scopeTrigMv, next);
                           }}>
-                          {scopeTrigEdge === "falling" ? "↘" : "↗"}
+                          {scopeTrigEdge === "falling" ? "â†˜" : "â†—"}
                         </button>
                       </>
                     ) : null}
@@ -580,9 +726,12 @@ export function App() {
             onDcOffset={(ch, dac) => updateChannel(ch, { dc_offset: dac })}
             onName={(ch, name) => updateChannel(ch, { name })}
             yRanges={yRanges} onYRange={changeYRange} waveMode={waveMode}
-            clearEpoch={wipeEpoch} />
+            clearEpoch={wipeEpoch}
+            locked={isLocked} onUnlock={unlockOne} />
         </main>
+        )}
 
+        {view === "live" ? (
         <aside>
           {(() => {
             // The digitized TR0 trace, when TR digitizing is on: the same
@@ -644,9 +793,16 @@ export function App() {
               ) : null}
             </div>
           </div>
-          <Collapsible title="Unit Settings" defaultOpen>
-            <SettingsList defs={catalog.unit} geom={catalog.geometry}
-              get={(k) => (config as any)[k]} onChange={updateBoard} />
+          <Collapsible title="Trigger &amp; Timing" defaultOpen>
+            <SettingsList
+              defs={catalog.unit.filter((d) => LIVE_UNIT_KEYS.has(d.key))}
+              geom={catalog.geometry}
+              get={(k) => (config as any)[k]} onChange={updateBoard}
+              locked={isLocked} onUnlock={unlockOne} />
+            <p className="muted">
+              Sampling, output format and the other campaign-tier settings
+              live on the Experiment tab.
+            </p>
           </Collapsible>
           <Collapsible title="TR0 Trigger" defaultOpen>
             {(() => {
@@ -665,20 +821,27 @@ export function App() {
                     <span className="field">
                       <BlurInput type="number" step={0.005} min={-1.986} max={2.979}
                         selectOnFocus value={absV.toFixed(3)}
+                        disabled={isLocked("fast_trigger_threshold")}
                         onCommit={(v) => {
                           updateTrBoth("fast_trigger_threshold",
                             trThresholdDacForAbs(Number(v) || 0));
                         }} />
                       <span className="unit">V</span>
                     </span>
+                    {isLocked("fast_trigger_threshold") ? (
+                      <button className="lock-chip"
+                        title="Locked. Click to unlock just the TR threshold."
+                        onClick={() => unlockOne("fast_trigger_threshold")}>🔒</button>
+                    ) : null}
                     {!offMid ? (
                       <span className="muted tr-rel-note" title="UM4270 9.8.3: the threshold volts are only calibrated with the TR DC offset at midscale (0x8000); CAEN provides no formula for other offsets.">
-                        ⚠ offset not at midscale
+                        âš  offset not at midscale
                       </span>
                     ) : null}
                   </div>
                   <SettingsList defs={offDefs} geom={catalog.geometry}
-                    get={(k) => (g0 as any)[k]} onChange={updateTrBoth} />
+                    get={(k) => (g0 as any)[k]} onChange={updateTrBoth}
+                    locked={isLocked} onUnlock={unlockOne} />
                   {diverged ? (
                     <div className="tr-diverged">
                       The two banks' TR0 registers differ (bank 1 has its own
@@ -702,11 +865,10 @@ export function App() {
               );
             })()}
           </Collapsible>
-          <Collapsible title="Bank Settings" defaultOpen>
-            <BankPanel catalog={catalog} config={config} onGroupChange={updateGroup} />
-          </Collapsible>
           <CalibrationPanel
             connected={connected} recording={recording}
+            locked={isLocked("calibration")}
+            onUnlock={() => unlockOne("calibration")}
             onStarted={() => setWipeEpoch((e) => e + 1)}
             onError={(title, lines) => push("err", title, lines)}
             onFinished={async (st) => {
@@ -726,61 +888,6 @@ export function App() {
                 push("ok", `Calibration done - ${st.report.length} channels ok`);
               }
             }} />
-          <SessionsPanel
-            recording={recording}
-            onSaved={(name) => push("ok", `Session "${name}" saved`)}
-            onError={(title, lines) => push("err", title, lines)}
-            onApplied={(cfg, display, errors, connected, name) => {
-              setConfig(cfg); confirmed.current = cfg;
-              setYRanges(fromPrefs(display));
-              setWaveMode(asWaveMode(display.wave_mode));
-              if (!connected) {
-                push("warn", `Session "${name}": display restored`,
-                     ["No unit connected - hardware settings were not written."]);
-              } else if (errors.length) {
-                push("err", `Session "${name}" applied with errors`, errors);
-              } else {
-                push("ok", `Session "${name}" applied and read back from unit`);
-              }
-            }} />
-          <ConfigPanel
-            onReset={async () => {
-              try {
-                const r = await api.resetDefault();
-                setConfig(r.config); confirmed.current = r.config;
-                if (r.connected === false) {
-                  push("warn", "No unit connected", ["Nothing was sent."]);
-                } else if (r.errors?.length) {
-                  push("err", "Unit rejected part of the reset", r.errors);
-                } else {
-                  push("ok", "Defaults applied and read back from unit");
-                }
-              } catch (e) {
-                failed("Could not reset the settings")(e);
-              }
-            }}
-            onLoaded={({ config: cfg, notes, errors, restart, connected: up, running }) => {
-              // Adopt what the unit reported even when it refused something:
-              // that IS its state now, and showing the old values instead would
-              // be the one thing this app must never do.
-              setConfig(cfg); confirmed.current = cfg;
-              if (!up) {
-                push("warn", "No unit connected", ["The file was read, but nothing was sent."]);
-              } else if (errors.length) {
-                push("err", "Unit rejected a setting from the file",
-                     [...errors, ...notes]);
-              } else {
-                push(notes.length ? "warn" : "ok",
-                     "Config loaded and read back from unit", notes);
-              }
-              if (restart.length && running) {
-                const what = restart.join(", ");
-                if (confirm(`${what} only take effect when the unit is re-armed.\n\nRestart acquisition now?`)) {
-                  api.stop().then(() => api.start()).then(setStatus)
-                    .catch(failed("Could not re-arm the unit"));
-                }
-              }
-            }} />
           {status?.errors?.length ? (
             <div className="card errors">
               <h2>Errors</h2>
@@ -789,6 +896,7 @@ export function App() {
           ) : null}
           <RunsPanel status={status} refreshKey={runsKey} />
         </aside>
+        ) : null}
         </fieldset>
       </div>
       <Toasts toasts={toasts} onDismiss={dismiss} />
@@ -798,14 +906,42 @@ export function App() {
             role="dialog" aria-label="Run notes">
             <h3>
               Run {runNo.trim() || status?.next_run_number || "?"}
-              {runName.trim() ? ` · ${runName.trim()}` : ""}
-              {recMax.trim() ? ` · ${recMax.trim()} events` : ""}
+              {runName.trim() ? ` Â· ${runName.trim()}` : ""}
+              {recMax.trim() ? ` Â· ${recMax.trim()} events` : ""}
             </h3>
             <p className={"rec-dest " + (intoExisting ? "into" : "")}>
               {intoExisting
                 ? `Adds run_${runNo.trim() || status?.next_run_number}.root to the existing folder`
                 : "Creates a new run folder"}
             </p>
+            {/* Confirm-setup digest: the server's truth at this moment - the
+                last look before these become this run's permanent record. */}
+            <div className="rec-digest">
+              <div className="rec-digest-row mono">
+                {catalog.unit.find((d) => d.key === "drs4_frequency")
+                  ?.choices?.find((c) => c.value === config.drs4_frequency)?.label
+                  ?? config.drs4_frequency}
+                {" · "}{config.output_format.toUpperCase()}
+                {" · "}corr {config.correction_level}
+                {" · "}post {config.post_trigger}%
+                {" · "}TR thr {config.groups[0].fast_trigger_threshold}
+                {" / off "}{config.groups[0].fast_trigger_dc_offset}
+              </div>
+              {recCond.filter((c) => c.key.trim()).length ? (
+                <div className="rec-digest-cond">
+                  {recCond.filter((c) => c.key.trim()).map((c, i) => (
+                    <span className="cond-pill mono" key={i}>
+                      {c.key} = {c.value}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="muted">
+                  No experiment conditions set - add beam energy, bias, and
+                  friends on the Experiment tab; they snapshot into every run.
+                </p>
+              )}
+            </div>
             <textarea autoFocus rows={4} maxLength={2000} value={recNote}
               placeholder="What is this run? Tested device, beam energy, HV, conditions..."
               onChange={(e) => setRecNote(e.target.value)}

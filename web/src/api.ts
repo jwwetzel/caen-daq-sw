@@ -75,6 +75,14 @@ export const api = {
     }).then(j<{ ok: boolean; error?: string; scope_hz: number | null;
                 scope_trigger: ScopeTrigger | null; status: Status }>),
 
+  conditions: () =>
+    fetch("/api/conditions").then(j<{ items: Condition[] }>),
+  setConditions: (items: Condition[]) =>
+    fetch("/api/conditions", {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items }),
+    }).then(j<{ ok: boolean; items: Condition[] }>),
+
   getDisplay: () => fetch("/api/display").then(j<DisplayPrefs>),
   setDisplay: (d: DisplayPrefs) =>
     fetch("/api/display", {
@@ -131,11 +139,22 @@ export interface ScopeTrigger {
  *  replaced event by event - the line-noise debugging view). */
 export type WaveMode = "avg" | "overlay" | "scope";
 
+/** One operator-declared experiment fact - the DAQ carries these and
+ *  snapshots them into every run's metadata; it never interprets them. */
+export interface Condition {
+  key: string;
+  value: string;
+}
+
 /** UI state that persists across restarts, keyed however the UI likes.
- *  y_ranges: per-channel waveform display range in volts, [min, max]. */
+ *  y_ranges: per-channel waveform display range in volts, [min, max].
+ *  lock_on/lock_open: the settings lock - everything locked, individually
+ *  unlocked exceptions listed by key. */
 export interface DisplayPrefs {
   y_ranges?: Record<string, [number, number]>;
   wave_mode?: WaveMode;
+  lock_on?: boolean;
+  lock_open?: string[];
 }
 
 /** Subscribe to telemetry; auto-reconnects. Returns an unsubscribe fn. */

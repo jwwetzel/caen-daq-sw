@@ -62,6 +62,41 @@ def set_display(display: dict) -> None:
     os.replace(tmp, _display_path())
 
 
+# ---------- experiment conditions (the operator's key=value facts) ----------
+# Beam energy, SiPM bias, which capillaries: facts only the operator knows,
+# which the DAQ carries but never interprets. An ORDERED list, not a dict -
+# the operator's ordering is part of how the shift reads it. Snapshotted BY
+# VALUE into every run's metadata at record time, so editing them later can
+# never rewrite what was true for an already-taken run.
+def _conditions_path() -> str:
+    return os.path.join(runtime.state_dir(), "conditions.json")
+
+
+def get_conditions() -> list[dict]:
+    try:
+        with open(_conditions_path()) as f:
+            d = json.load(f)
+    except (OSError, ValueError):
+        return []
+    items = d.get("items") if isinstance(d, dict) else None
+    if not isinstance(items, list):
+        return []
+    return [{"key": str(i.get("key", ""))[:80], "value": str(i.get("value", ""))[:400]}
+            for i in items if isinstance(i, dict)]
+
+
+def set_conditions(items: list[dict]) -> list[dict]:
+    cleaned = [{"key": str(i.get("key", ""))[:80],
+                "value": str(i.get("value", ""))[:400]}
+               for i in items if isinstance(i, dict) and str(i.get("key", "")).strip()]
+    os.makedirs(runtime.state_dir(), exist_ok=True)
+    tmp = _conditions_path() + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump({"items": cleaned, "saved_at": time.time()}, f, indent=2)
+    os.replace(tmp, _conditions_path())
+    return cleaned
+
+
 # ---------- named sessions ----------
 def listing() -> list[dict]:
     try:
@@ -83,14 +118,18 @@ def listing() -> list[dict]:
     return out
 
 
-def save(name: str, config: dict, display: dict) -> Optional[dict]:
+def save(name: str, config: dict, display: dict,
+         conditions: list | None = None) -> Optional[dict]:
     name = safe_name(name)
     if not name:
         return None
     os.makedirs(_dir(), exist_ok=True)
     record = {"format": "dt5742b-daq/session", "version": 1,
               "name": name, "saved_at": time.time(),
-              "config": config, "display": display}
+              "config": config, "display": display,
+              # The experiment context is part of a named state too: applying
+              # a session restores the whole operator-facing world.
+              "conditions": conditions if conditions is not None else get_conditions()}
     tmp = _path(name) + ".tmp"
     with open(tmp, "w") as f:
         json.dump(record, f, indent=2)

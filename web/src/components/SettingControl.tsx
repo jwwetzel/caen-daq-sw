@@ -29,6 +29,7 @@ function clamp(raw: number, min?: number, max?: number): number {
  *  a voltage is edited as volts; the DAC word never reaches the operator. */
 export function SettingControl({ def, value, geom, dependsOn, disabled, onChange }: Props) {
   if (def.type === "steps") {
+    if (disabled) return <span className="muted mono">{String(value ?? "—")}</span>;
     const steps = def.values_by_freq?.[String(dependsOn)] ?? [];
     return steps.length
       ? <StepControl steps={steps} value={Number(value ?? 0)} onChange={onChange} />

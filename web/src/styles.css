@@ -575,6 +575,71 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 /* the raw TR threshold's live "vs offset" depth readout */
 .tr-rel-note { font-size: 10.5px; white-space: nowrap; margin-left: 6px; }
 
+/* Live | Experiment: the two worlds - operating vs campaign setup */
+.view-tabs { display: inline-flex; margin-left: 14px; }
+.view-tabs button {
+  font-size: 12.5px; padding: 4px 14px; cursor: pointer;
+  background: #12151b; color: var(--muted); border: 1px solid var(--border);
+}
+.view-tabs button:first-child { border-radius: 6px 0 0 6px; }
+.view-tabs button:last-child { border-radius: 0 6px 6px 0; margin-left: -1px; }
+.view-tabs button.on {
+  background: #1f2a3a; color: var(--text); border-color: #3b5a86;
+  position: relative; z-index: 1; font-weight: 650;
+}
+
+/* the settings lock: one big switch, per-setting exceptions */
+.lock-all {
+  margin-left: 10px; font-size: 12px; padding: 4px 12px; cursor: pointer;
+  border-radius: 6px; border: 1px solid var(--border);
+  background: #12151b; color: var(--muted);
+}
+.lock-all.on { background: #3a2a12; color: #e3b341; border-color: #7a5a1e; }
+.lock-chip {
+  background: none; border: none; cursor: pointer; padding: 0 4px;
+  font-size: 13px; line-height: 1; opacity: .85;
+}
+.lock-chip:hover { opacity: 1; background: none; border: none; }
+.tile { position: relative; }
+.tile-lock { position: absolute; right: 6px; bottom: 34px; z-index: 2; }
+.tile-dc.locked input { pointer-events: none; opacity: .45; }
+
+/* experiment view layout */
+main.experiment { overflow-y: auto; }
+.exp-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+  align-items: start; max-width: 1200px;
+}
+@media (max-width: 1000px) { .exp-grid { grid-template-columns: 1fr; } }
+.exp-col { display: flex; flex-direction: column; gap: 14px; }
+
+/* the operator's key=value experiment facts */
+.cond-list { display: flex; flex-direction: column; gap: 6px; }
+.cond-row { display: flex; align-items: center; gap: 6px; }
+.cond-row input {
+  font: inherit; font-size: 12px; padding: 4px 8px; border-radius: 5px;
+  border: 1px solid var(--border); background: #0d1117; color: var(--text);
+}
+.cond-key { width: 170px; }
+.cond-val { flex: 1; }
+.cond-eq { color: var(--muted); }
+.cond-add {
+  align-self: flex-start; margin-top: 4px; font-size: 12px;
+  padding: 3px 10px; cursor: pointer;
+}
+
+/* confirm-setup digest inside the record dialog */
+.rec-digest {
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px 10px; margin: 0 0 10px; background: #0d1117;
+}
+.rec-digest-row { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+.rec-digest-cond { display: flex; flex-wrap: wrap; gap: 5px; }
+.cond-pill {
+  font-size: 11px; padding: 2px 8px; border-radius: 10px;
+  background: #1f2a3a; color: var(--text); border: 1px solid #3b5a86;
+}
+
 /* run-notes dialog: the pause between Record and recording, where the
    operator writes down what this run IS - the one fact no readback holds. */
 .modal-backdrop {

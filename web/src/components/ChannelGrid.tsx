@@ -15,6 +15,9 @@ interface Props {
   onYRange: (ch: number, range: [number, number] | null, all: boolean) => void;
   waveMode: "avg" | "overlay" | "scope";
   clearEpoch: number;
+  /** The settings lock, keyed "ch:<n>" per channel offset. */
+  locked?: (key: string) => boolean;
+  onUnlock?: (key: string) => void;
 }
 
 // DEAD keys off a SINGLE event's peak-to-peak, not the average: averaging
@@ -26,7 +29,8 @@ const DEAD_LAST_VPP = 5;
 const RAIL_LO = 5, RAIL_HI = 4090;  // 12-bit corrected range clip guards
 
 export function ChannelGrid({ catalog, config, tele, onDcOffset, onName,
-                              yRanges, onYRange, waveMode, clearEpoch }: Props) {
+                              yRanges, onYRange, waveMode, clearEpoch,
+                              locked, onUnlock }: Props) {
   const g = catalog.geometry;
   const gsize = g.group_size;
   // undefined = follow the bank's enabled flag; set = the user overrode it
@@ -119,7 +123,17 @@ export function ChannelGrid({ catalog, config, tele, onDcOffset, onName,
                         offsetDac={shownDac} offsetSlope={countsPerLsb(g)}
                         clearEpoch={clearEpoch} />
 
-                      <div className="tile-dc" title={`${dcHelp}\n\nDAC word: ${shownDac}`}>
+                      {(() => {
+                        const chLocked = locked?.(`ch:${ch}`) ?? false;
+                        if (!chLocked) return null;
+                        return (
+                          <button className="lock-chip tile-lock"
+                            title="DC offset locked. Click to unlock just this channel."
+                            onClick={() => onUnlock?.(`ch:${ch}`)}>🔒</button>
+                        );
+                      })()}
+                      <div className={"tile-dc" + ((locked?.(`ch:${ch}`) ?? false) ? " locked" : "")}
+                        title={`${dcHelp}\n\nDAC word: ${shownDac}`}>
                         <label>DC offset</label>
                         {/* Coarse placement by slider (0.01 V steps, previewed
                             live in the band above, written on release); fine

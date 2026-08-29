@@ -5,6 +5,9 @@ import type { CalibrationStatus } from "../api";
 interface Props {
   connected: boolean;
   recording: boolean;
+  /** The settings lock: calibration steers DC offsets, so it locks too. */
+  locked?: boolean;
+  onUnlock?: () => void;
   /** A run began - here or in another window; the app wipes the piles. */
   onStarted?: () => void;
   /** Called when a run finishes: the server changed the config underneath the
@@ -21,8 +24,8 @@ interface Props {
  *  Fit to signal: with real triggers flowing, each channel's actual
  *  excursions - afterpulses of either sign included - are measured and the
  *  baseline placed so the whole pulse sits in the window with margin. */
-export function CalibrationPanel({ connected, recording, onStarted,
-                                   onFinished, onError }: Props) {
+export function CalibrationPanel({ connected, recording, locked, onUnlock,
+                                   onStarted, onFinished, onError }: Props) {
   const [st, setSt] = useState<CalibrationStatus | null>(null);
   const [fitEvents, setFitEvents] = useState("100");
   const wasActive = useRef(false);
@@ -88,11 +91,16 @@ export function CalibrationPanel({ connected, recording, onStarted,
     <div className="card">
       <h2>Calibration</h2>
       <div className="calib-btns">
-        <button disabled={!connected || busy || recording} onClick={() => run("baseline")}
+        {locked ? (
+          <button className="lock-chip"
+            title="Calibration locked - it steers DC offsets. Click to unlock."
+            onClick={onUnlock}>🔒</button>
+        ) : null}
+        <button disabled={!connected || busy || recording || locked} onClick={() => run("baseline")}
           title="Software triggers; every channel's baseline (TR0 too) is servoed to the window centre. The setup-day tool: works on a dark bench, recovers railed channels, flags sick ones.">
           Center baselines <span className="calib-note">no signal needed</span>
         </button>
-        <button disabled={!connected || busy || recording} onClick={() => run("fit")}
+        <button disabled={!connected || busy || recording || locked} onClick={() => run("fit")}
           title="Needs real triggers. Measures each channel's actual pulse excursions - afterpulses of either sign included - and places the baseline so everything fits in the window with margin.">
           Fit to pulses <span className="calib-note">needs triggers</span>
         </button>

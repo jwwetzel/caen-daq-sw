@@ -655,8 +655,11 @@ class AcquisitionEngine:
                     rec.done(f"Not started: could not create the run directory: {e}")
                     self._record_error(f"record: {e}")
                     return {"ok": False, "error": f"could not create the run directory: {e}"}
+            # The experiment conditions travel with the run, snapshotted BY
+            # VALUE the moment recording starts.
+            from . import sessions
             writer = make_writer(path, run_id, cfg.output_format, run_number,
-                                 note)
+                                 note, sessions.get_conditions())
             try:
                 writer.open(cfg)
                 logsetup.did(log, "Creating the run directory", path)

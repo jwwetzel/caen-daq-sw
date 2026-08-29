@@ -27,14 +27,21 @@ test("loads with the fake unit connected and all 16 channels", async ({ page }) 
   await expect(page.locator(".tile-foot .n").first()).toHaveText(/^n=\d+$/);
 });
 
-test("unit settings: required first, optional gated behind checkboxes", async ({ page }) => {
-  const grid = page.locator(".settings-grid").first();
-  const rows = grid.locator("> *");
-  // Five required rows, then the divider, then the optional rows.
-  await expect(rows.nth(0)).toContainText("Sampling frequency");
-  await expect(rows.nth(4)).toContainText("Fast trigger");
-  await expect(rows.nth(5)).toHaveClass(/settings-divider/);
+test("unit settings split: campaign on Experiment, trigger tuning on Live", async ({ page }) => {
+  // Live keeps only what is tuned while watching the plots.
+  const live = page.locator(".settings-grid").first();
+  await expect(live.locator(".setting-row", { hasText: "Fast trigger" }).first())
+    .toBeVisible();
+  await expect(live.locator(".setting-row", { hasText: "Sampling frequency" }))
+    .toHaveCount(0);
+  // Campaign settings, required first then the gated optionals, live on the
+  // Experiment view.
+  await page.locator(".view-tabs button", { hasText: "Experiment" }).click();
+  const grid = page.locator(".exp-grid .settings-grid").first();
+  await expect(grid.locator("> *").nth(0)).toContainText("Sampling frequency");
+  await expect(grid.locator(".settings-divider")).toBeVisible();
   await expect(grid.locator(".setting-row.optional").first()).toBeVisible();
+  await page.locator(".view-tabs button", { hasText: "Live" }).click();
 });
 
 test("TR threshold is shown in TR-calibrated volts", async ({ page }) => {
@@ -69,6 +76,7 @@ test("moving the TR offset leaves the raw threshold untouched", async ({ page })
 test("unchecking an optional setting writes its default to the unit", async ({ page }) => {
   // Customize "Dump header" (default off), then uncheck the row: the value
   // must return to the default ON THE SERVER, not merely in the form.
+  await page.locator(".view-tabs button", { hasText: "Experiment" }).click();
   const row = page.locator(".setting-row.optional", { hasText: "Dump header" });
   const box = row.locator('input[type="checkbox"]').first();
   await box.check();                                  // engage
@@ -79,6 +87,7 @@ test("unchecking an optional setting writes its default to the unit", async ({ p
 });
 
 test("a typed out-of-range value is clamped before it reaches the unit", async ({ page }) => {
+  await page.locator(".view-tabs button", { hasText: "Experiment" }).click();
   const row = page.locator(".setting-row.optional", { hasText: "Events per readout" });
   await row.locator('input[type="checkbox"]').first().check();
   const input = row.locator('input[type="number"]');
@@ -168,17 +177,21 @@ test("the 'full' button resets a channel's range to the full window", async ({ p
 test("sessions: save, perturb, apply restores the unit, delete", async ({ page }) => {
   const mark = (await cfg(page)).channels[0].dc_offset;
 
+  await page.locator(".view-tabs button", { hasText: "Experiment" }).click();
   await page.locator(".session-save input").fill("pw-test");
   await page.locator(".session-save button").click();
   const row = page.locator(".session-row", { hasText: "pw-test" });
   await expect(row).toBeVisible();
 
-  // Perturb through the UI, then apply the session: the unit must go back.
+  // Perturb through the UI (a Live-view channel field), then apply the
+  // session from the Experiment view: the unit must go back.
+  await page.locator(".view-tabs button", { hasText: "Live" }).click();
   const field = page.locator(".tile-dc input[type=number]").first();
   await field.fill("-0.3");
   await field.press("Enter");
   await expect.poll(async () => (await cfg(page)).channels[0].dc_offset).not.toBe(mark);
 
+  await page.locator(".view-tabs button", { hasText: "Experiment" }).click();
   await row.locator("button", { hasText: "Apply" }).click();
   await expect.poll(async () => (await cfg(page)).channels[0].dc_offset).toBe(mark);
   await expect(page.getByText(/applied and read back/)).toBeVisible();
@@ -415,6 +428,41 @@ test("a second run joins an existing folder when picked without timestamp", asyn
   await page.locator(".rec-stamp input").check(); // leave it as found
 });
 
+test("experiment conditions reach the server and the record dialog", async ({ page }) => {
+  await page.locator(".view-tabs button", { hasText: "Experiment" }).click();
+  await page.locator(".cond-add").click();
+  await page.locator(".cond-key").last().fill("XCET 40");
+  await page.locator(".cond-val").last().fill("40 bar");
+  // The debounced save lands server-side...
+  await expect.poll(async () => {
+    const r = await (await page.request.get("/api/conditions")).json();
+    return r.items.some((c: { key: string }) => c.key === "XCET 40");
+  }).toBe(true);
+  // ...and the confirm-setup digest shows it before anything records.
+  await page.locator(".view-tabs button", { hasText: "Live" }).click();
+  await page.locator(".rec-group button.record").click();
+  await expect(page.locator(".cond-pill", { hasText: "XCET 40" })).toBeVisible();
+  await page.locator(".rec-modal button", { hasText: "Cancel" }).click();
+});
+
+test("lock everything, then unlock a single setting", async ({ page }) => {
+  await page.locator(".lock-all").click();
+  await expect(page.locator(".lock-all")).toContainText("LOCKED");
+  // Every settings row is locked and wears its own chip...
+  const row = page.locator(".settings-grid .setting-row",
+    { hasText: "Trigger edge" }).first();
+  await expect(row.locator(".lock-chip")).toBeVisible();
+  await expect(row.locator("select")).toBeDisabled();
+  // ...and clicking the chip unlocks JUST that row.
+  await row.locator(".lock-chip").click();
+  await expect(row.locator(".lock-chip")).toHaveCount(0);
+  await expect(row.locator("select")).toBeEnabled();
+  // Unlock everything again so later tests are unaffected.
+  page.on("dialog", (d) => d.accept());
+  await page.locator(".lock-all").click();
+  await expect(page.locator(".lock-all")).not.toContainText("LOCKED");
+});
+
 test("a legacy Configuration B file loads through the Load button", async ({ page }) => {
   const legacy = [
     "Module 125", "DRS4FREQ 0",
@@ -422,6 +470,8 @@ test("a legacy Configuration B file loads through the Load button", async ({ pag
     "TR0OFFSE 32768", "TRG__TR0 20934",
     "TRGPOLAR 1", "POSTTRIG 0", "LEMO_LEV 0", "GPO_BUSY 1",
   ].join("\n");
+  // The Load button lives on the Experiment view now.
+  await page.locator(".view-tabs button", { hasText: "Experiment" }).click();
   // Straight onto the hidden input - clicking Load would open the native
   // chooser, which is the browser's UI, not ours to test.
   await page.locator('input[type="file"]').setInputFiles({

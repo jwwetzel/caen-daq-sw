@@ -8,6 +8,10 @@ interface Props {
   get: (key: string) => any;
   onChange: (key: string, value: any) => void;
   skip?: string[];
+  /** The settings lock: everything locked, unlocked one at a time. A locked
+   *  row still shows its value - protection, not concealment. */
+  locked?: (key: string) => boolean;
+  onUnlock?: (key: string) => void;
 }
 
 /** Required settings first - the ones every run must have deliberately chosen -
@@ -15,7 +19,15 @@ interface Props {
  *  setting is pinned to its default: unchecking one writes the default back to
  *  the unit, so the checkbox states always describe what the hardware holds,
  *  not merely what the form shows. */
-export function SettingsList({ defs, geom, get, onChange, skip = [] }: Props) {
+export function SettingsList({ defs, geom, get, onChange, skip = [],
+                               locked, onUnlock }: Props) {
+  const isLocked = (key: string) => locked?.(key) ?? false;
+  const lockChip = (key: string) =>
+    isLocked(key) ? (
+      <button className="lock-chip"
+        title="Locked. Click to unlock just this setting."
+        onClick={() => onUnlock?.(key)}>🔒</button>
+    ) : null;
   const shown = defs.filter((d) => !skip.includes(d.key));
   // Only an entry that declares its default can be pinned to it. Tiers whose
   // catalog carries no defaults (the bank panel) render every row plainly.
@@ -35,7 +47,9 @@ export function SettingsList({ defs, geom, get, onChange, skip = [] }: Props) {
       <label>{def.label}</label>
       <SettingControl def={def} value={get(def.key)} geom={geom}
         dependsOn={def.depends_on ? get(def.depends_on) : undefined}
+        disabled={isLocked(def.key)}
         onChange={(v) => onChange(def.key, v)} />
+      {lockChip(def.key)}
     </div>
   );
 
@@ -53,15 +67,16 @@ export function SettingsList({ defs, geom, get, onChange, skip = [] }: Props) {
     return (
       <div className={"setting-row optional" + (active ? "" : " off")} key={def.key}
         title={[def.help, def.caen].filter(Boolean).join("\n\n")}>
-        <input type="checkbox" checked={active}
+        <input type="checkbox" checked={active} disabled={isLocked(def.key)}
           title={active ? "Uncheck to return this setting to its default"
                         : "Check to customize this setting"}
           onChange={(e) => toggle(e.target.checked)} />
         <label>{def.label}</label>
         <SettingControl def={def} value={get(def.key)} geom={geom}
           dependsOn={def.depends_on ? get(def.depends_on) : undefined}
-          disabled={!active}
+          disabled={!active || isLocked(def.key)}
           onChange={(v) => onChange(def.key, v)} />
+        {lockChip(def.key)}
       </div>
     );
   };
