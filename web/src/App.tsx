@@ -489,7 +489,7 @@ export function App() {
         <div className="acq-group">
           {!running ? (
             <button className="primary" onClick={start} disabled={!connected}
-              title={connected ? "Watch live â€” nothing is written to disk"
+              title={connected ? "Watch live — nothing is written to disk"
                                : "No unit connected"}>
               Enable Acquisition
             </button>
@@ -511,7 +511,7 @@ export function App() {
                 <span className="rec-name mono">{tele?.run_id ?? status?.run_id}</span>
                 <span className="rec-count mono">
                   <Elapsed since={tele?.run_started ?? status?.run_started ?? null} />
-                  {" Â· "}{tele?.recorded ?? 0} ev
+                  {" · "}{tele?.recorded ?? 0} ev
                 </span>
                 <button className="danger" onClick={stopRec}>Stop recording</button>
               </>
@@ -644,10 +644,10 @@ export function App() {
           <div className="grid-head">
             <h2>Channels <span className="sub">
               {waveMode === "avg"
-                ? `all 16 Â· avg ${tele?.avg_window_s ?? 1}s window Â· click a title to rename`
+                ? `all 16 · avg ${tele?.avg_window_s ?? 1}s window · click a title to rename`
                 : waveMode === "scope"
-                ? `all 16 Â· newest single trace, full resolution Â· click a title to rename`
-                : `all 16 Â· last ${PERSIST_TRACES} events, density-shaded Â· click a title to rename`}
+                ? `all 16 · newest single trace, full resolution · click a title to rename`
+                : `all 16 · last ${PERSIST_TRACES} events, density-shaded · click a title to rename`}
             </span></h2>
             <div className="wave-mode" role="group" aria-label="Waveform display mode">
               <button className={waveMode === "avg" ? "on" : ""}
@@ -707,7 +707,7 @@ export function App() {
                             setScopeTrigEdge(next);
                             applyScope(scopeHz, scopeTrigCh, scopeTrigMv, next);
                           }}>
-                          {scopeTrigEdge === "falling" ? "â†˜" : "â†—"}
+                          {scopeTrigEdge === "falling" ? "↘" : "↗"}
                         </button>
                       </>
                     ) : null}
@@ -906,8 +906,8 @@ export function App() {
             role="dialog" aria-label="Run notes">
             <h3>
               Run {runNo.trim() || status?.next_run_number || "?"}
-              {runName.trim() ? ` Â· ${runName.trim()}` : ""}
-              {recMax.trim() ? ` Â· ${recMax.trim()} events` : ""}
+              {runName.trim() ? ` · ${runName.trim()}` : ""}
+              {recMax.trim() ? ` · ${recMax.trim()} events` : ""}
             </h3>
             <p className={"rec-dest " + (intoExisting ? "into" : "")}>
               {intoExisting
