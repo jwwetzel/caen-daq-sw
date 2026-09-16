@@ -28,12 +28,12 @@ test("loads with the fake unit connected and all 16 channels", async ({ page }) 
 });
 
 test("unit settings split: campaign on Experiment, trigger tuning on Live", async ({ page }) => {
-  // Live keeps only what is tuned while watching the plots.
-  const live = page.locator(".settings-grid").first();
-  await expect(live.locator(".setting-row", { hasText: "Fast trigger" }).first())
+  // Live keeps only what is tuned while watching the plots: Fast trigger is
+  // present, Sampling frequency is not (it moved to Experiment).
+  await expect(page.locator(".setting-row", { hasText: "Fast trigger" }).first())
     .toBeVisible();
-  await expect(live.locator(".setting-row", { hasText: "Sampling frequency" }))
-    .toHaveCount(0);
+  await expect(page.locator("main + aside .setting-row",
+    { hasText: "Sampling frequency" })).toHaveCount(0);
   // Campaign settings, required first then the gated optionals, live on the
   // Experiment view.
   await page.locator(".view-tabs button", { hasText: "Experiment" }).click();

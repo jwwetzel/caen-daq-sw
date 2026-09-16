@@ -197,14 +197,17 @@ BANK_SETTINGS = [
              "On the DT5742B both banks configure the same TR0 input - keep "
              "them equal."},
     {"key": "fast_trigger_dc_offset", "label": "TR DC offset", "type": "volts",
-     "lsb_v": -4.66e-5, "zero_dac": 33540,
+     "lsb_v": -4.66e-5, "zero_dac": 32768,
      "caen": "CAEN_DGTZ_SetGroupFastTriggerDCOffset",
-     "help": "Shifts the TR input's own baseline so the threshold has room "
-             "to sit.\n\n"
-             "Leave it near midscale for NIM and other negative pulses; "
-             "raise it for positive signals. Volts use the TR path's "
-             "measured calibration (-0.0466 mV per DAC step, zero at "
-             "33540)."},
+     "help": "Positions the TR0 baseline (its 0-Volt). UM4270 9.8.3: DAC "
+             "0x8000 = 32768 puts the baseline at MIDSCALE (0 V), which is "
+             "also the only offset where the threshold's volts are "
+             "calibrated - so keep it here unless you must fit an asymmetric "
+             "pulse.\n\n"
+             "0 V = baseline centred; a small negative value drops the "
+             "baseline to make room for a positive pulse above it. Volts use "
+             "the measured slope (-0.0466 mV per DAC step) anchored at the "
+             "manual's midscale zero."},
 ]
 
 CHANNEL_SETTINGS = [

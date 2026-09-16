@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, openTelemetry } from "./api";
 import type { Condition, DisplayPrefs, WaveMode } from "./api";
 import { ConditionsPanel } from "./components/ConditionsPanel";
@@ -777,6 +777,67 @@ export function App() {
               </div>
             );
           })()}
+          <Collapsible title="TR0 Trigger" defaultOpen>
+            {(() => {
+              const offDefs = catalog.bank.filter((d) =>
+                d.key === "fast_trigger_dc_offset");
+              const [g0, g1] = config.groups;
+              const diverged = ["fast_trigger_threshold", "fast_trigger_dc_offset"]
+                .some((k) => (g0 as any)[k] !== (g1 as any)[k]);
+              const absV = trAbsThresholdV(g0.fast_trigger_threshold);
+              const offMid = g0.fast_trigger_dc_offset === TR_OFF_MID_DAC;
+              return (
+                <>
+                  <div className="setting-row"
+                    title={"Trigger level in the manual's arithmetic (UM4270 9.8.3): volts relative to the TR signal's 0-Volt, valid with the TR DC offset at midscale (0x8000). A -140 mV falling trigger is simply -0.140 here. CAEN states no simple formula exists at other offsets - keep the offset at midscale.\n\nCAEN_DGTZ_SetGroupFastTriggerThreshold"}>
+                    <label>TR threshold <span className="muted">vs TR zero</span></label>
+                    <span className="field">
+                      <BlurInput type="number" step={0.005} min={-1.986} max={2.979}
+                        selectOnFocus value={absV.toFixed(3)}
+                        disabled={isLocked("fast_trigger_threshold")}
+                        onCommit={(v) => {
+                          updateTrBoth("fast_trigger_threshold",
+                            trThresholdDacForAbs(Number(v) || 0));
+                        }} />
+                      <span className="unit">V</span>
+                    </span>
+                    {isLocked("fast_trigger_threshold") ? (
+                      <button className="lock-chip"
+                        title="Locked. Click to unlock just the TR threshold."
+                        onClick={() => unlockOne("fast_trigger_threshold")}>🔒</button>
+                    ) : null}
+                    {!offMid ? (
+                      <span className="muted tr-rel-note" title="UM4270 9.8.3: the threshold volts are only calibrated with the TR DC offset at midscale (0x8000); CAEN provides no formula for other offsets.">
+                        ⚠ offset not at midscale
+                      </span>
+                    ) : null}
+                  </div>
+                  <SettingsList defs={offDefs} geom={catalog.geometry}
+                    get={(k) => (g0 as any)[k]} onChange={updateTrBoth}
+                    locked={isLocked} onUnlock={unlockOne} />
+                  {diverged ? (
+                    <div className="tr-diverged">
+                      The two banks' TR0 registers differ (bank 1 has its own
+                      values). Editing here writes both;{" "}
+                      <button onClick={() => {
+                        const groups = config.groups.map((gc) => ({
+                          ...gc,
+                          fast_trigger_threshold: g0.fast_trigger_threshold,
+                          fast_trigger_dc_offset: g0.fast_trigger_dc_offset,
+                        }));
+                        pushConfig({ ...config, groups });
+                      }}>sync bank 1 to bank 0</button>
+                    </div>
+                  ) : null}
+                  <p className="muted">
+                    One input, split to both banks; this panel writes both
+                    together. Threshold volts are calibrated only with the
+                    offset at midscale (UM4270 9.8.3).
+                  </p>
+                </>
+              );
+            })()}
+          </Collapsible>
           <div className="card">
             <h2>Trigger rate</h2>
             <RateStrip tele={tele} />
@@ -818,67 +879,6 @@ export function App() {
               Sampling, output format and the other campaign-tier settings
               live on the Experiment tab.
             </p>
-          </Collapsible>
-          <Collapsible title="TR0 Trigger" defaultOpen>
-            {(() => {
-              const offDefs = catalog.bank.filter((d) =>
-                d.key === "fast_trigger_dc_offset");
-              const [g0, g1] = config.groups;
-              const diverged = ["fast_trigger_threshold", "fast_trigger_dc_offset"]
-                .some((k) => (g0 as any)[k] !== (g1 as any)[k]);
-              const absV = trAbsThresholdV(g0.fast_trigger_threshold);
-              const offMid = g0.fast_trigger_dc_offset === TR_OFF_MID_DAC;
-              return (
-                <>
-                  <div className="setting-row"
-                    title={"Trigger level in the manual's arithmetic (UM4270 9.8.3): volts relative to the TR signal's 0-Volt, valid with the TR DC offset at midscale (0x8000). A -140 mV falling trigger is simply -0.140 here. CAEN states no simple formula exists at other offsets - keep the offset at midscale.\n\nCAEN_DGTZ_SetGroupFastTriggerThreshold"}>
-                    <label>TR threshold <span className="muted">vs TR zero</span></label>
-                    <span className="field">
-                      <BlurInput type="number" step={0.005} min={-1.986} max={2.979}
-                        selectOnFocus value={absV.toFixed(3)}
-                        disabled={isLocked("fast_trigger_threshold")}
-                        onCommit={(v) => {
-                          updateTrBoth("fast_trigger_threshold",
-                            trThresholdDacForAbs(Number(v) || 0));
-                        }} />
-                      <span className="unit">V</span>
-                    </span>
-                    {isLocked("fast_trigger_threshold") ? (
-                      <button className="lock-chip"
-                        title="Locked. Click to unlock just the TR threshold."
-                        onClick={() => unlockOne("fast_trigger_threshold")}>🔒</button>
-                    ) : null}
-                    {!offMid ? (
-                      <span className="muted tr-rel-note" title="UM4270 9.8.3: the threshold volts are only calibrated with the TR DC offset at midscale (0x8000); CAEN provides no formula for other offsets.">
-                        âš  offset not at midscale
-                      </span>
-                    ) : null}
-                  </div>
-                  <SettingsList defs={offDefs} geom={catalog.geometry}
-                    get={(k) => (g0 as any)[k]} onChange={updateTrBoth}
-                    locked={isLocked} onUnlock={unlockOne} />
-                  {diverged ? (
-                    <div className="tr-diverged">
-                      The two banks' TR0 registers differ (bank 1 has its own
-                      values). Editing here writes both;{" "}
-                      <button onClick={() => {
-                        const groups = config.groups.map((gc) => ({
-                          ...gc,
-                          fast_trigger_threshold: g0.fast_trigger_threshold,
-                          fast_trigger_dc_offset: g0.fast_trigger_dc_offset,
-                        }));
-                        pushConfig({ ...config, groups });
-                      }}>sync bank 1 to bank 0</button>
-                    </div>
-                  ) : null}
-                  <p className="muted">
-                    One input, split to both banks; this panel writes both
-                    together. The threshold is relative to the baseline and
-                    follows the offset automatically.
-                  </p>
-                </>
-              );
-            })()}
           </Collapsible>
           <CalibrationPanel
             connected={connected} recording={recording}
