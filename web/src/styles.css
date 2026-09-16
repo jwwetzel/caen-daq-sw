@@ -575,6 +575,16 @@ a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 /* the raw TR threshold's live "vs offset" depth readout */
 .tr-rel-note { font-size: 10.5px; white-space: nowrap; margin-left: 6px; }
 
+/* the trigger-model explainer: the fact that the 16 channels can't trigger */
+.trig-guide {
+  border: 1px solid var(--border); border-radius: 6px;
+  padding: 8px 10px; margin-bottom: 10px; background: #0d1117;
+  font-size: 11.5px; line-height: 1.4;
+}
+.trig-guide p { margin: 0 0 6px; }
+.trig-guide p:last-child { margin-bottom: 0; }
+.trig-warn { color: var(--orange, #d29922); }
+
 /* Live | Experiment: the two worlds - operating vs campaign setup */
 .view-tabs { display: inline-flex; margin-left: 14px; }
 .view-tabs button {

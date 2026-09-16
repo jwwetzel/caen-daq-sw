@@ -794,6 +794,21 @@ export function App() {
             </div>
           </div>
           <Collapsible title="Trigger &amp; Timing" defaultOpen>
+            <div className="trig-guide">
+              <p><b>The board fires when ANY enabled source crosses its
+                level</b> (logical OR of the sources below).</p>
+              <p className="trig-warn">The 16 signal channels <b>cannot</b>
+                trigger the board. To trigger on your signal, feed a copy into
+                <b> TR0</b> (analog, has a threshold) or <b>TRG-IN</b> (a NIM/TTL
+                logic pulse).</p>
+              <p className="muted">
+                TR0: match the <b>edge</b> to your pulse (rising = positive-going),
+                keep the <b>TR DC offset at midscale</b> (its threshold is only
+                calibrated there), and set the <b>threshold</b> just above baseline
+                noise. TR0 halves its input (÷2), so a 30 mV pulse is ~15 mV at
+                the comparator.
+              </p>
+            </div>
             <SettingsList
               defs={catalog.unit.filter((d) => LIVE_UNIT_KEYS.has(d.key))}
               geom={catalog.geometry}

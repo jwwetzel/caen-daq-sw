@@ -183,7 +183,11 @@ BANK_SETTINGS = [
     {"key": "fast_trigger_threshold", "label": "TR threshold", "type": "volts",
      "lsb_v": 7.5758e-5, "zero_dac": 26214,
      "caen": "CAEN_DGTZ_SetGroupFastTriggerThreshold",
-     "help": "Trigger level in volts relative to the TR signal's 0-Volt "
+     "help": "TR0 FAST-TRIGGER level. TR0 halves its input (divide-by-2), so a "
+             "+30 mV pulse is ~15 mV here - set the threshold just above the "
+             "baseline noise, on the correct edge (rising for positive pulses). "
+             "ONLY meaningful with the TR DC offset at midscale.\n\n"
+             "Trigger level in volts relative to the TR signal's 0-Volt "
              "(UM4270 9.8.3) - a -140 mV falling trigger is -0.140 here. "
              "Valid with the TR DC offset at midscale (0x8000 = 0 V), where "
              "CAEN's calibration applies; the manual provides no formula "
